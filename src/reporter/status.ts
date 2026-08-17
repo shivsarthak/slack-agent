@@ -83,6 +83,8 @@ export interface JobStatus {
    * assignments rather than a hundred API calls.
    */
   observe(event: EngineEvent): void;
+  /** Replace in-flight activity with the stable human decision wait, then resume. */
+  setWaitingForApproval(waiting: boolean): Promise<void>;
   /** The Job is over: write the final state, and stop refreshing. */
   settle(outcome: JobOutcome): Promise<void>;
 }
@@ -276,6 +278,10 @@ export async function startJobStatus(deps: StatusDeps): Promise<JobStatus> {
   };
 
   return {
+    async setWaitingForApproval(waiting): Promise<void> {
+      bumpActivity(waiting ? { verb: "Waiting for approval", subject: undefined } : undefined);
+      await queue("working");
+    },
     observe(event: EngineEvent): void {
       switch (event.type) {
         case "plan":

@@ -4,6 +4,11 @@ status: accepted
 
 # The repository is the action boundary, not the tool policy
 
+**Amended by [ADR-0008](0008-goal-aware-approval-gate.md).** In guarded modes the Approval
+Gate is the intent-aware pre-execution boundary. The deny-list, credential scope, repository
+protection, and local hook below remain independent defence in depth. The historical
+unattended posture remains available only through explicit `off` mode.
+
 The coworker acts unattended ([ADR-0001](0001-codex-cli-via-exec-and-sdk.md)) while reading untrusted input from Slack, GitHub, and Linear, so there is no human between a crafted issue comment and an action. We bound this in three layers: the coworker may do **anything a human can undo after the fact** but not the known irreversible actions (`merge_pull_request`, `merge_diff`, `submit_diff_review`, `delete_file`, and Linear's known delete tools); those exact tools are enforced as a **deny-list** for MCP servers; and because the agent has shell access and the token doubles as the git password, the irreversible actions are made impossible **server-side by branch protection on the default branch** — the tool policy is defence-in-depth, not the boundary.
 
 **Amended by [ADR-0007](0007-github-is-an-official-mcp-server.md): GitHub returns to layer 2.**
@@ -57,7 +62,9 @@ organisation management, and workflow modification are withheld.
 - **MCP annotations are not a portable safety primitive.** Measured: Linear flags 18 of 57 tools destructive; GitHub flags exactly one (`delete_file`) and leaves `merge_pull_request` and `push_files` unflagged. The deny-list is therefore hand-curated.
 - **Linear has no equivalent third layer.** Its API key carries whatever the user can do, and there is no repository-shaped thing to protect, so the Linear half runs on layers 1 and 2 alone. That was equally true before this amendment, but it is now the weaker half and should be documented as such.
 - **Linear's `save_*` tools are upserts.** "May create but not modify" is not expressible at tool granularity — only at argument granularity — so that line is deliberately not drawn. GitHub splits create/update; Linear does not. Do not assume symmetry between connectors.
-- **Sandbox is `workspace-write` with network enabled**; `execpolicy` is unrestricted in v1. Per-command rules cost more tuning than they buy once the repository is the boundary.
+- **Guarded Jobs start read-only with shell network disabled.** Exact capability expansions
+  are intercepted by App Server. Explicit `off` mode retains the former `workspace-write`,
+  network-enabled posture.
 - **Inventory evolution favours availability.** New tools become available without an
   operator approval step. Add a tool to `disabledTools` when a connector-specific exclusion
   is required.

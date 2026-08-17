@@ -1,7 +1,7 @@
 /**
  * Connectors are MCP servers named in configuration (ADR-0005) — there is no
- * plugin interface. The wrapper is not in the tool path; the only thing it does
- * with a connector is probe it at startup and generate Codex configuration.
+ * plugin interface. The wrapper probes it, generates Codex configuration, and evaluates
+ * App Server's normalized pre-execution approval envelope; it does not proxy business APIs.
  */
 
 interface McpServerPolicy {

@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
 
-// The contract seam: slow, opt-in tests that run a real `codex exec`. This is the
+// The contract seam: slow, opt-in tests that run a real Codex App Server. This is the
 // only place a fake can drift from reality, and with no Codex version pin in v1 it
 // is the safety net standing between an upstream alpha and a silently broken
 // instance. Run it against whatever version is installed, not only at a bump.

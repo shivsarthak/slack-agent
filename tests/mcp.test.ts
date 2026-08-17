@@ -18,6 +18,6 @@ describe("the official MCP client adapter", () => {
 
     const inventory = await createMcpInventoryProber(process.env).probe(server);
 
-    expect(inventory.tools).toEqual(["read_fixture"]);
+    expect(inventory.tools).toEqual(["read_fixture", "write_marker"]);
   });
 });

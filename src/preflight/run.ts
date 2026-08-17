@@ -48,12 +48,24 @@ export async function runPreflight(deps: {
   deps.log.info(`MCP configuration: ${deps.config.mcpConfigSource}`);
 
   await checkEngine(deps);
+  reportApprovals(deps);
   reportBounds(deps);
   await reportVault(deps);
   await checkSkills(deps);
   await checkSlack(deps);
   await checkConnectors(deps);
   await checkRepositories(deps);
+}
+
+function reportApprovals(deps: { config: Config; log: Logger }): void {
+  const approval = deps.config.approvals;
+  deps.log.info(
+    `Approval Gate: ${approval.mode}; natural-language policy ${approval.policy ? "configured" : "absent"}; ` +
+      `${approval.rules.length} deterministic rule(s). ` +
+      (approval.mode === "off"
+        ? "Interception is disabled explicitly."
+        : `Shell capability expansion and all ${deps.config.mcpServers.filter((server) => server.enabled).length} enabled MCP server(s) are approval-intercepted.`),
+  );
 }
 
 async function checkRepositories(deps: {

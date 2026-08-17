@@ -32,6 +32,7 @@ export const DEFAULT_THREAD_TS = "1700000000.000100";
 
 export interface HarnessOptions {
   operatingManual?: string;
+  approvals?: Config["approvals"];
   /**
    * Connectors, as configuration names them.
    */
@@ -162,6 +163,7 @@ export async function coworkerHarness(options: HarnessOptions = {}): Promise<Cow
     stateDir,
     operatingManualPath,
     engine: { model: "gpt-5.6-sol", reasoningEffort: "low" },
+    approvals: options.approvals ?? { mode: "coworker", rules: [] },
     // The shipped defaults unless a test says otherwise: a bound test that invented
     // its own numbers would pass while the numbers a self-hoster actually runs with
     // went untested.

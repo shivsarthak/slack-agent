@@ -22,6 +22,30 @@ export interface PostedMessage {
   ts: string;
 }
 
+export const APPROVE_ONCE_ACTION = "approval_approve_once";
+export const ALLOW_SIMILAR_ACTION = "approval_allow_similar";
+export const DENY_ACTION = "approval_deny";
+
+export interface ApprovalPost {
+  thread: Thread;
+  requestId: string;
+  category: string;
+  target: string;
+  environment: string;
+  preview: string;
+  effect: string;
+  risk: string;
+  reason: string;
+  grantScope: string;
+}
+
+export interface ApprovalPresentation extends ApprovalPost {
+  actions: readonly { actionId: string; label: string; value: string; style?: "primary" | "danger" }[];
+}
+
+export interface SettleApproval { thread: Thread; ts: string; text: string; }
+export interface EphemeralMessage { thread: Thread; userId: string; text: string; }
+
 export interface SlackChannel {
   id: string;
   name: string;
@@ -121,6 +145,9 @@ export interface SlackClient {
   /** Upload an artifact and share it directly into the originating Thread. */
   uploadFile(file: UploadFile): Promise<UploadedFile>;
   postMessage(message: PostMessage): Promise<PostedMessage>;
+  postApproval(message: ApprovalPost): Promise<PostedMessage>;
+  settleApproval(message: SettleApproval): Promise<void>;
+  postEphemeral(message: EphemeralMessage): Promise<void>;
   /**
    * Rewrite a message in place. Preferred over posting for progress: `chat.update` is
    * Tier 3 (50+/minute) where `chat.postMessage` is about one per second per channel,

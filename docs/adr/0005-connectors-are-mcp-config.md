@@ -4,6 +4,10 @@ status: accepted
 
 # Connectors are MCP servers in configuration — there is no plugin interface
 
+**Amended by [ADR-0008](0008-goal-aware-approval-gate.md): the wrapper is now in the
+pre-execution approval path.** It still does not proxy or normalize connector business APIs;
+App Server supplies a normalized approval envelope before configured calls execute.
+
 **Amended by [ADR-0007](0007-github-is-an-official-mcp-server.md): the GitHub carve-out is removed.**
 GitHub's official MCP server now uses this same interface. The superseded Skill-over-`gh`
 design in ADR-0006 never reached a working Job path and duplicated configuration,
@@ -24,7 +28,12 @@ open-agent policy, not transport configuration. Tool inventories are intentional
 pinned: additions and removals do not prevent startup. Research:
 [`mcp-typescript-sdk-client-config.md`](../../.scratch/slack-coworker/research/mcp-typescript-sdk-client-config.md).
 
-"Connect it to various apps" is delivered by pointing Codex at MCP servers, not by a connector API this project defines. Two facts settled it. First, **the wrapper is not in the tool path**: under [ADR-0001](0001-codex-cli-via-exec-and-sdk.md) Codex reads MCP servers from its own config and calls them directly, so any normalising layer would mean shipping a **proxy MCP server** — a whole component to build, secure, and keep synchronised with upstreams that change without notice. Second, **normalisation would have to lie**: GitHub's binary `open`/`closed` against Linear's team-scoped `WorkflowState`, no lattice between Project/Team/Repo/Cycle/Initiative, flat comments against threaded-and-polymorphic ones, and a `save_*` upsert idiom against `create_*`/`update_*`. A uniform surface flattens to a lowest common denominator and misrepresents the difference; a capable model is better served by each service's real vocabulary.
+"Connect it to various apps" is delivered by pointing Codex at MCP servers, not by a
+connector API this project defines. The wrapper now sees App Server's pre-execution
+approval envelope but still does not proxy the call. Normalizing connector business APIs
+would have to lie: GitHub's binary `open`/`closed` differs from Linear's team-scoped
+`WorkflowState`, and their project, comment, and upsert semantics do not form one honest
+portable surface. A capable model is better served by each service's real vocabulary.
 
 ## Consequences
 

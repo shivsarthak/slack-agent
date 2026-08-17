@@ -30,6 +30,10 @@ import type {
   UpdateMessage,
   UploadedFile,
   UploadFile,
+  ApprovalPost,
+  ApprovalPresentation,
+  SettleApproval,
+  EphemeralMessage,
 } from "../../src/ports/slack.ts";
 import type { Thread } from "../../src/thread.ts";
 
@@ -67,6 +71,9 @@ export interface FileUploadCall extends UploadFile {
 }
 
 export class FakeSlack implements SlackClient {
+  readonly approvalPosts: ApprovalPresentation[] = [];
+  readonly approvalSettlements: SettleApproval[] = [];
+  readonly ephemeralPosts: EphemeralMessage[] = [];
   /** Every text Slack was asked to show, posts and edits together, in order. */
   readonly writes: SlackWrite[] = [];
   /** Set to make `auth.test` fail, as a revoked or mistyped bot token would. */
@@ -185,6 +192,20 @@ export class FakeSlack implements SlackClient {
     return { ts };
   }
 
+  async postApproval(message: ApprovalPost): Promise<PostedMessage> {
+    const ts = `post-${this.nextTs++}`;
+    this.approvalPosts.push({ ...message, actions: [
+      { actionId: "approval_approve_once", label: "Approve once", value: message.requestId, style: "primary" },
+      { actionId: "approval_allow_similar", label: "Allow similar in this Thread", value: message.requestId },
+      { actionId: "approval_deny", label: "Deny", value: message.requestId, style: "danger" },
+    ] });
+    this.record("post", ts, message.thread, `Approval required: ${message.target}`);
+    return { ts };
+  }
+
+  async settleApproval(message: SettleApproval): Promise<void> { this.approvalSettlements.push(message); this.record("edit", message.ts, message.thread, message.text); }
+  async postEphemeral(message: EphemeralMessage): Promise<void> { this.ephemeralPosts.push(message); }
+
   async updateMessage(message: UpdateMessage): Promise<void> {
     this.editAttempts.push({ ...message, at: this.clock.now() });
     const held = this.heldEdits.get(message.ts);
@@ -257,6 +278,7 @@ export type EngineScript = (context: {
    * the coworker's own desk rather than only to somewhere outside it.
    */
   workingDirectory: string;
+  requestApproval: (action: import("../../src/ports/engine.ts").PlannedAction) => Promise<"allow" | "deny">;
 }) => AsyncIterable<EngineEvent> | Iterable<EngineEvent> | Promise<Iterable<EngineEvent>>;
 
 /** One Turn the fake engine was asked to run. */
@@ -293,9 +315,9 @@ export class FakeEngine implements Engine {
   versionToReport = RECORDED_CODEX_VERSION;
   /** What the real adapter configures, restated so the startup report has something true. */
   sandbox: SandboxPosture = {
-    mode: "workspace-write",
-    networkEnabled: true,
-    execPolicy: "unrestricted (no rules configured)",
+    mode: "read-only",
+    networkEnabled: false,
+    execPolicy: "every capability expansion is intercepted",
   };
 
   /** Replaced per test to script what the engine does. */
@@ -318,6 +340,8 @@ export class FakeEngine implements Engine {
   async version(): Promise<string> {
     return this.versionToReport;
   }
+
+  async close(): Promise<void> {}
 
   /**
    * Resolves once `count` Turns have been asked for.
@@ -399,7 +423,12 @@ export class FakeEngine implements Engine {
             yield { type: "turn-started" } as const;
             const scripted = await Promise.race([
               Promise.resolve(
-                kind.script({ prompt, sessionId, workingDirectory: options.workingDirectory }),
+                kind.script({
+                  prompt,
+                  sessionId,
+                  workingDirectory: options.workingDirectory,
+                  requestApproval: async (action) => runOptions?.onApproval?.(action) ?? "allow",
+                }),
               ),
               killed.rejected,
             ]);

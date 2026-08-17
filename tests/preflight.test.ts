@@ -71,9 +71,10 @@ describe("the engine and the bounds", () => {
     // Read off the adapter rather than restated, so this line cannot claim a posture the
     // engine does not configure. It is layer 2 for everything reached by shell.
     const logs = h.logs.join("\n");
-    expect(logs).toContain("workspace-write");
-    expect(logs).toMatch(/network enabled/);
-    expect(logs).toMatch(/execpolicy unrestricted/);
+    expect(logs).toContain("read-only");
+    expect(logs).toMatch(/network disabled/);
+    expect(logs).toMatch(/Approval Gate: coworker/);
+    expect(logs).toMatch(/execpolicy every capability expansion is intercepted/);
   });
 
   it("reports the bounds, including one a self-hoster has lowered", async () => {

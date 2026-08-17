@@ -1,8 +1,13 @@
 ---
-status: accepted
+status: superseded
+superseded_by: 0008-goal-aware-approval-gate.md
 ---
 
 # Codex CLI as the agent engine, driven via `codex exec` and `@openai/codex-sdk`
+
+**Superseded by [ADR-0008](0008-goal-aware-approval-gate.md).** Codex remains the engine,
+but ordinary Jobs now use App Server for a wrapper-owned approval round trip. This file
+records the former decision and rationale.
 
 The coworker needs an agent that can be delegated a task from a Slack thread and left to work for minutes or hours. We use **OpenAI's Codex CLI** as that engine, driven headlessly through **`codex exec`** via the **`@openai/codex-sdk`** TypeScript SDK, rather than the `app-server` JSON-RPC interface. Codex is open source, locally installed, filesystem-native (an Obsidian vault is just files it already reads and writes) and an MCP client, which matches a self-hosted product whose users supply their own credentials. `exec` was chosen over `app-server` because the product decision is that the coworker **does not stop to ask permission** — it runs commands, calls APIs, and opens pull requests unattended — and `exec` hard-codes exactly that (`approval_policy: Never`) on the stable, Apache-2.0, TypeScript-native path, whereas `app-server`'s only decisive advantage was the approval round-trip we do not want.
 

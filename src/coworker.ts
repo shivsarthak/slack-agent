@@ -49,6 +49,9 @@ import {
   type WorkspaceLifecycle,
 } from "./workspaces/lifecycle.ts";
 import { writeScope } from "./writes/classify.ts";
+import { createApprovalCoordinator, type ApprovalClick, type ApprovalClickResult } from "./approvals/coordinator.ts";
+import { approvalStoreFile, openApprovalStore } from "./approvals/store.ts";
+import { createContextualReviewer } from "./approvals/reviewer.ts";
 
 /** A human addressing the coworker with a task, in the wrapper's own terms. */
 export interface Mention {
@@ -118,9 +121,16 @@ export interface Coworker {
   handleMention(mention: Mention): Promise<StartedJob>;
   /** Submit a claimed Schedule Occurrence through the ordinary Job pipeline. */
   handleScheduled(request: ScheduledRequest): Promise<ScheduledJob>;
+  handleApproval(click: ApprovalClick): Promise<ApprovalClickResult>;
 }
 
 export function createCoworker(deps: CoworkerDeps): Coworker {
+  const approvals = openApprovalStore({ filePath: approvalStoreFile(deps.config.stateDir) }).then((store) =>
+    createApprovalCoordinator({
+      config: deps.config.approvals, slack: deps.slack, store, clock: deps.clock, log: deps.log,
+      ...(deps.config.approvals.policy ? { reviewer: createContextualReviewer({ engine: deps.engine, clock: deps.clock }) } : {}),
+    }),
+  );
   /**
    * The Jobs running right now, by Thread — the whole of what a hard-stop needs.
    *
@@ -155,6 +165,7 @@ export function createCoworker(deps: CoworkerDeps): Coworker {
   });
 
   return {
+    handleApproval: async (click) => (await approvals).decide(click),
     preflight: async () => {
       await runPreflight(deps);
       // Reclaiming years of old workspaces can take minutes. It is housekeeping, not a
@@ -171,7 +182,10 @@ export function createCoworker(deps: CoworkerDeps): Coworker {
       // kill, and giving it a status message would leave an "On it" hanging over a
       // Thread where the answer is that something has ended.
       if (isStopRequest(mention.text)) {
-        return { jobId: mention.eventId, completed: hardStop(deps, running, queue, mention) };
+        return { jobId: mention.eventId, completed: Promise.all([
+          hardStop(deps, running, queue, mention),
+          approvals.then((coordinator) => coordinator.cancelThread(threadKey(mention.thread))),
+        ]).then(() => undefined) };
       }
 
       // Taken before the acknowledgement is posted, and synchronously: the promise is
@@ -204,6 +218,7 @@ export function createCoworker(deps: CoworkerDeps): Coworker {
         jobId: mention.eventId,
         completed: runInTurn(
           deps,
+          approvals,
           running,
           vaultWindows,
           vaultChangeLog,
@@ -247,6 +262,7 @@ export function createCoworker(deps: CoworkerDeps): Coworker {
         jobId: mention.eventId,
         completed: runInTurn(
           deps,
+          approvals,
           running,
           vaultWindows,
           vaultChangeLog,
@@ -280,6 +296,7 @@ type Acknowledgement =
  */
 async function runInTurn(
   deps: CoworkerDeps,
+  approvals: Promise<Awaited<ReturnType<typeof createApprovalCoordinator>>>,
   running: Map<string, JobBounds>,
   vaultWindows: VaultWindows,
   vaultChangeLog: VaultChangeLog,
@@ -295,6 +312,7 @@ async function runInTurn(
     try {
       completion = await runJob(
         deps,
+        await approvals,
         running,
         vaultWindows,
         vaultChangeLog,
@@ -391,6 +409,7 @@ async function hardStop(
 
 async function runJob(
   deps: CoworkerDeps,
+  approvals: Awaited<ReturnType<typeof createApprovalCoordinator>>,
   running: Map<string, JobBounds>,
   vaultWindows: VaultWindows,
   vaultChangeLog: VaultChangeLog,
@@ -537,6 +556,20 @@ async function runJob(
       for await (const event of session.run(prompt, {
         signal: bounds.signal,
         imagePaths: ingestedFiles.filter(isVisualInput).map((file) => file.path),
+        onApproval: async (action, engineSignal) => {
+          await status.setWaitingForApproval(true);
+          const decision = await approvals.authorize(action, {
+            request: mention.text,
+            trustedHumanMessages: threadMessages
+              .filter((message) => message.userId === mention.userId)
+              .map((message) => message.text),
+            threadKey: threadKey(mention.thread),
+            requesterUserId: mention.userId,
+            workspaceDirectory: workingDirectory,
+          }, mention.thread, engineSignal === undefined ? bounds.signal : AbortSignal.any([bounds.signal, engineSignal]));
+          if (!bounds.signal.aborted) await status.setWaitingForApproval(false);
+          return decision;
+        },
       })) {
         // Everything the engine does reaches the status message, which shows the plan
         // and the step it is on. Nothing is announced as its own message: individual

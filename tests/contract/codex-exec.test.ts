@@ -15,7 +15,7 @@ import { testTempDir } from "../support/test-root.ts";
 /**
  * The contract seam.
  *
- * These tests run a **real `codex exec`**, so they need working Codex credentials
+ * These tests run a **real Codex App Server**, so they need working Codex credentials
  * and they cost tokens. They are excluded from `pnpm test` and run with
  * `pnpm test:contract`.
  *
@@ -33,7 +33,7 @@ let engine: Engine;
 let workspace: string;
 
 beforeAll(async () => {
-  engine = await createCodexEngine({ model: "gpt-5.6-sol", reasoningEffort: "low" });
+  engine = await createCodexEngine({ model: "gpt-5.6-sol", reasoningEffort: "low", approvalMode: "off" });
   workspace = await mkdtemp(path.join(os.tmpdir(), "open-agent-contract-"));
   await writeFile(
     path.join(workspace, "AGENTS.md"),
@@ -43,46 +43,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await engine.close();
   await rm(workspace, { recursive: true, force: true });
 });
-
-/** Every process this one spawned directly. */
-const childPids = (): Promise<number[]> => childPidsOf(process.pid);
-
-/** The direct children of a pid. `pgrep` prints nothing and exits 1 when there are none. */
-async function childPidsOf(pid: number): Promise<number[]> {
-  const { stdout } = await promisify(execFile)("pgrep", ["-P", String(pid)]).catch(() => ({
-    stdout: "",
-  }));
-  return stdout
-    .split("\n")
-    .map((line) => Number(line.trim()))
-    .filter((child) => Number.isInteger(child) && child > 0);
-}
-
-/** Everything below a pid, however deep. A shell command is not always a direct child. */
-async function descendantsOf(pid: number): Promise<number[]> {
-  const children = await childPidsOf(pid);
-  const below = await Promise.all(children.map(descendantsOf));
-  return [...children, ...below.flat()];
-}
-
-/** Signal 0 asks the kernel whether the process exists without touching it. */
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function until(condition: () => boolean, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition() && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
 
 describe("the real engine", () => {
   it("reports the version that will actually run", async () => {
@@ -140,7 +103,9 @@ describe("the real engine", () => {
     // A second engine over the same installed Codex, sharing nothing with the first
     // but the identifier — which is exactly what the wrapper persists and all it has
     // after a restart. The Session's content is on Codex's disk, not in this process.
-    const restarted = await createCodexEngine({ model: "gpt-5.6-sol", reasoningEffort: "low" });
+    await engine.close();
+    const restarted = await createCodexEngine({ model: "gpt-5.6-sol", reasoningEffort: "low", approvalMode: "off" });
+    engine = restarted;
     const resumed = restarted.resumeSession(sessionId!, { workingDirectory: workspace });
 
     const answers: string[] = [];
@@ -404,6 +369,11 @@ describe("the real engine", () => {
     // the prompt rather than the arrangement.
     process.env.INVENTORY_PATH = inventory;
 
+    // App Server is long-lived and inherits the environment at process start. Restart it
+    // after setting the fixture variable, as a production restart after editing `.env` would.
+    await engine.close();
+    engine = await createCodexEngine({ model: "gpt-5.6-sol", reasoningEffort: "low", approvalMode: "off" });
+
     const session = engine.startSession({
       workingDirectory: workspace,
       writableDirectories: [path.join(obsidian, "Notes")],
@@ -468,10 +438,12 @@ describe("the real engine", () => {
       notesDir: path.join(repo, "vault"),
     });
     const writes: Write[] = [];
+    const commandEvents: EngineEvent[] = [];
     for await (const event of session.run(
       "Append the word two to README.md, commit it with git, and push it to origin on " +
         "the current branch. Do not use gh. Then reply with just DONE.",
     )) {
+      if (event.type === "command") commandEvents.push(event);
       writes.push(...writesIn(event, scope));
     }
 
@@ -485,7 +457,7 @@ describe("the real engine", () => {
     // demonstrably worked — the remote moved — yet it arrives inside a chained command
     // that ends non-zero often enough that "the push succeeded" is not a claim the exit
     // code supports. `Write.failure` says only what is known.
-    expect(writes.map((write) => write.action)).toContain("Pushed to a git remote");
+    expect(writes.map((write) => write.action), JSON.stringify(commandEvents)).toContain("Pushed to a git remote");
     // The commit and the edit are not Writes: one is inside the checkout it was given,
     // and the other never left the workspace at all.
     expect(writes.every((write) => write.action === "Pushed to a git remote")).toBe(true);
@@ -493,78 +465,25 @@ describe("the real engine", () => {
     await rm(repo, { recursive: true, force: true });
   });
 
-  /**
-   * The bounds — the wall clock, the Turn cap, the token budget, and a person typing
-   * "stop" — all reduce to one thing: abort the signal the run was given. Every one of
-   * them is worthless if that leaves a real `codex exec` running, and no fake can tell
-   * us whether it does. A Job that has been stopped and is still spending money has not
-   * been stopped.
-   *
-   * The process is found rather than assumed: the SDK spawns the binary as a direct
-   * child of this one, so anything new under this pid during the run is it.
-   */
-  it("kills the real Codex process when the run is aborted", async () => {
+  it("interrupts the active Turn while keeping the supervised server alive", async () => {
     const controller = new AbortController();
     const session = engine.startSession({ workingDirectory: workspace });
-    const before = await childPids();
     const startedAt = Date.now();
-
-    let spawned: number[] = [];
-    let underIt: number[] = [];
     const run = (async () => {
       for await (const event of session.run(
         "Run the shell command `sleep 120` and then reply with just DONE.",
         { signal: controller.signal },
-      )) {
-        // Aborted while a command is genuinely in flight, which is the shape of every
-        // Job a bound ever stops — not a process idling between turns.
-        if (event.type === "command" && event.status === "in-progress") {
-          spawned = (await childPids()).filter((pid) => !before.includes(pid));
-          underIt = (await Promise.all(spawned.map(descendantsOf))).flat();
-          controller.abort();
-        }
-      }
+      )) if (event.type === "command" && event.status === "in-progress") controller.abort();
     })();
 
-    // The abort surfaces as a rejection, which is why the Job runner prefers the reason
-    // the bound holds over the one the error carries.
     await expect(run).rejects.toThrow();
-    expect(spawned.length).toBeGreaterThan(0);
+    expect(Date.now() - startedAt).toBeLessThan(30_000);
 
-    for (const pid of spawned) {
-      // SIGTERM is not instant; a couple of seconds is generous and still nothing like
-      // the two minutes the command it was running would have taken.
-      await until(() => !alive(pid), 5_000);
-      expect(alive(pid)).toBe(false);
-    }
-    // And it did not quietly wait for `sleep 120` to finish first.
-    expect(Date.now() - startedAt).toBeLessThan(90_000);
-
-    /**
-     * **The command Codex had already launched outlives it**, reparented to init.
-     * Measured, not assumed, and asserted as measured rather than as desirable: the
-     * SDK kills the process it spawned, and that process is not a process-group
-     * leader, so the `sleep 120` further down the tree keeps sleeping. Codex's own
-     * direct child does die — it is the leaf that is orphaned.
-     *
-     * This is a real limit on what "stop" means, and it is the same limit the Job's
-     * report already tells the human about: stopping unwinds nothing, and something in
-     * flight may land anyway. What it does **not** leak is spend — the model is only
-     * ever called by the process that just died — which is why the token budget is
-     * still a bound on cost.
-     *
-     * **If this starts failing, that is good news:** upstream began killing the
-     * process group, and this paragraph can go.
-     */
-    expect(underIt.length).toBeGreaterThan(0);
-    expect(underIt.some(alive)).toBe(true);
-    for (const pid of underIt) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        // Already gone. Nothing to tidy.
-      }
-    }
+    const answers: string[] = [];
+    for await (const event of engine.startSession({ workingDirectory: workspace }).run(
+      "Reply with exactly ALIVE. Do not run commands.",
+    )) if (event.type === "message") answers.push(event.text);
+    expect(answers.at(-1)).toContain("ALIVE");
   });
 
   it("translates a command execution, including its output and exit code", async () => {
