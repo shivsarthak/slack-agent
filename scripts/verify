@@ -1,7 +1,39 @@
 #!/bin/sh
-set -eu
+set -u
 
 cd "$(dirname "$0")/.."
 
-pnpm typecheck
-pnpm test
+stage() {
+  name=$1
+  shift
+  printf '[verify] %s\n' "$name"
+  if ! "$@"; then
+    printf '[verify] FAILED: %s\n' "$name" >&2
+    exit 1
+  fi
+}
+
+install_dependencies() {
+  # Some CI and Builder checkouts themselves live below the operating system's TMPDIR.
+  # Give the security tests a narrower temp root so their repo-local fixtures do not
+  # inherit the sandbox's special writable-temp grant.
+  mkdir -p .test-tmp/system || return
+  TMPDIR=$PWD/.test-tmp/system
+  export TMPDIR
+  CI=true pnpm install --frozen-lockfile && CI=true pnpm --dir dashboard install --frozen-lockfile
+}
+
+stage "dependencies" install_dependencies
+stage "formatting" pnpm format:check
+stage "root typecheck" pnpm typecheck
+stage "dashboard typecheck" pnpm --dir dashboard typecheck
+stage "tests" pnpm test
+stage "migrations" pnpm test:migrations
+stage "tenant isolation" pnpm test:isolation
+stage "encryption" pnpm test:encryption
+stage "queue semantics" pnpm test:queue
+stage "launcher and container policy" pnpm test:container-policy
+stage "Compose validation" pnpm compose:check
+stage "fake-service smoke" pnpm test:smoke
+
+printf '[verify] all stages passed\n'
