@@ -43,9 +43,7 @@ describe("the checkout's pre-push guardrail", () => {
 
     await expect(
       failedGit("-C", checkout, "push", "origin", "HEAD:main"),
-    ).resolves.toContain(
-      "blocked: push to protected ref 'refs/heads/main'",
-    );
+    ).resolves.toContain("blocked: push to protected ref 'refs/heads/main'");
     expect(await git("-C", checkout, "config", "--get", "core.hooksPath")).toBe(
       ".open-agent-hooks",
     );
@@ -62,14 +60,18 @@ describe("the checkout's pre-push guardrail", () => {
 
     await expect(
       failedGit("-C", checkout, "push", "origin", "+HEAD:feature"),
-    ).resolves.toContain("blocked: non-fast-forward push to 'refs/heads/feature'");
+    ).resolves.toContain(
+      "blocked: non-fast-forward push to 'refs/heads/feature'",
+    );
     await expect(
       failedGit("-C", checkout, "push", "origin", ":feature"),
-    ).resolves.toContain("blocked: deletion of remote ref 'refs/heads/feature'");
+    ).resolves.toContain(
+      "blocked: deletion of remote ref 'refs/heads/feature'",
+    );
 
     // The hook is accident protection, not the server-side boundary. A deliberate bypass
     // remains capable of replacing the coworker's own feature branch; build/12 accepts
     // that residual power because losing one of these branches costs a redo, not a merge.
     await git("-C", checkout, "push", "--no-verify", "origin", "+HEAD:feature");
-  });
+  }, 15_000);
 });

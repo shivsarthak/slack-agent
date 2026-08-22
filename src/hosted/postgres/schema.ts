@@ -73,13 +73,41 @@ export const slackInstallations = pgTable(
       .references(() => tenants.id, { onDelete: "cascade" }),
     id: text().notNull(),
     slackTeamId: text("slack_team_id").notNull().unique(),
+    teamName: text("team_name").notNull(),
     enterpriseId: text("enterprise_id"),
     botUserId: text("bot_user_id").notNull(),
     encryptedBotToken: text("encrypted_bot_token").notNull(),
     installedByUserId: uuid("installed_by_user_id").references(() => users.id),
     ...timestamps,
   },
-  (table) => [primaryKey({ columns: [table.tenantId, table.id] })],
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.id] }),
+    unique().on(table.tenantId),
+  ],
+);
+export const slackOauthStates = pgTable(
+  "slack_oauth_states",
+  {
+    stateHash: text("state_hash").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamps.createdAt,
+  },
+  (table) => [index("slack_oauth_states_expiry").on(table.expiresAt)],
+);
+export const slackDeliveries = pgTable(
+  "slack_deliveries",
+  {
+    deliveryKey: text("delivery_key").primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamps.createdAt,
+  },
+  (table) => [index("slack_deliveries_expiry").on(table.expiresAt)],
 );
 export const credentials = pgTable(
   "credentials",

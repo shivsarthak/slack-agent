@@ -81,6 +81,7 @@ const entityDefinitions = {
     columns: {
       id: "id",
       slackTeamId: "slack_team_id",
+      teamName: "team_name",
       enterpriseId: "enterprise_id",
       botUserId: "bot_user_id",
       encryptedBotToken: "encrypted_bot_token",
