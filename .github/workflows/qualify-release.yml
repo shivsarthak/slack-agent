@@ -1,0 +1,44 @@
+name: Qualify release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+      - name: Run all automated qualification checks
+        run: ./scripts/verify
+      - name: Build immutable release artifact
+        run: docker build --iidfile release-image.digest --tag open-agent:${{ github.sha }} .
+      - name: Create qualification manifest
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_EVIDENCE: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node --experimental-strip-types scripts/qualify-release.ts \
+            commit="$RELEASE_SHA" \
+            digest="$(cat release-image.digest)" \
+            verification="$RUN_EVIDENCE#verify" \
+            migration="$RUN_EVIDENCE#migrations" \
+            rollback="$RUN_EVIDENCE#rollback-rehearsal" \
+            qualifiedAt="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            output=qualification-manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qualification-manifest-${{ github.sha }}
+          path: qualification-manifest.json
+          if-no-files-found: error

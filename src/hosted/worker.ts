@@ -8,14 +8,20 @@ import type { SlackClient } from "../ports/slack.ts";
 import type { McpServerConfig } from "../ports/mcp.ts";
 import { createPiEngine } from "../engine/pi.ts";
 import type { HostedToolAuditEntry } from "./local-tools.ts";
-import { redact, type OperationalMetrics, type OperationalMetricName } from "./observability.ts";
+import {
+  redact,
+  type OperationalMetrics,
+  type OperationalMetricName,
+} from "./observability.ts";
 import { mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { trackTurnDurability } from "../jobs/interruption.ts";
+import type { DurableJob, JobLease } from "./postgres/job-queue.ts";
 import type {
-  DurableJob,
-  JobLease,
-} from "./postgres/job-queue.ts";
+  AdmittedEngine,
+  CanaryDecision,
+  CanaryOutcome,
+} from "./canary-admission.ts";
 
 export interface WorkerQueue {
   claim(owner: string, leaseMs: number): Promise<JobLease | undefined>;
@@ -39,6 +45,8 @@ export interface JobResultDelivery {
 /** Everything constructed from one Tenant's mount and credential file. */
 export interface HostedJobRuntime {
   tenant: Tenant;
+  /** Selected once per durable Job by the canary admission boundary. */
+  engineName?: AdmittedEngine;
   engine: Engine;
   sessions: SessionStore;
   workspaceDirectory: string;
@@ -54,13 +62,20 @@ export interface HostedJobWorker {
     | {
         claimed: true;
         jobId: string;
-        outcome: "succeeded" | "retrying" | "failed" | "cancelled" | "lease-lost";
+        outcome:
+          | "succeeded"
+          | "retrying"
+          | "failed"
+          | "cancelled"
+          | "lease-lost";
       }
   >;
 }
 
 /** Slack owns deduplication through client_msg_id at the external delivery seam. */
-export function slackResultDelivery(slack: SlackClient): HostedJobRuntime["deliverResult"] {
+export function slackResultDelivery(
+  slack: SlackClient,
+): HostedJobRuntime["deliverResult"] {
   return async (result) => {
     await slack.postMessage({
       thread: result.thread,
@@ -104,6 +119,7 @@ export function createMountedPiBootstrap(input: {
     });
     return {
       tenant: { id: tenantId(lease.tenantId) },
+      engineName: "pi",
       engine,
       sessions: input.sessions,
       workspaceDirectory: workspace,
@@ -112,6 +128,19 @@ export function createMountedPiBootstrap(input: {
       deliverResult: slackResultDelivery(input.slack),
       close: async () => {},
     };
+  };
+}
+
+/** Route a claimed Job through its stable Tenant canary decision. */
+export function createCanaryBootstrap<T>(input: {
+  admission: { decide(tenantId: string, jobId: string): CanaryDecision };
+  pi(lease: JobLease): Promise<T>;
+  codex(lease: JobLease): Promise<T>;
+}): (lease: JobLease) => Promise<T & { engineName: AdmittedEngine }> {
+  return async (lease) => {
+    const decision = input.admission.decide(lease.tenantId, lease.id);
+    const runtime = await input[decision.engine](lease);
+    return { ...runtime, engineName: decision.engine };
   };
 }
 
@@ -136,9 +165,14 @@ export function createHostedJobWorker(input: {
   bootstrap(lease: JobLease): Promise<HostedJobRuntime>;
   log?: Logger;
   metrics?: OperationalMetrics;
+  recordCanaryOutcome?: (outcome: CanaryOutcome) => void;
   classifyRetry?: (error: unknown) => "retryable" | "terminal";
 }): HostedJobWorker {
-  if (!input.owner || !Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0)
+  if (
+    !input.owner ||
+    !Number.isSafeInteger(input.leaseMs) ||
+    input.leaseMs <= 0
+  )
     throw new Error("Worker requires an owner and a positive lease duration");
 
   let busy = false;
@@ -178,7 +212,10 @@ export function createHostedJobWorker(input: {
           renewing = false;
         }
       };
-      const timer = setInterval(() => void renew(), Math.max(1, Math.floor(input.leaseMs / 3)));
+      const timer = setInterval(
+        () => void renew(),
+        Math.max(1, Math.floor(input.leaseMs / 3)),
+      );
       timer.unref();
       log(input.log, "job.claimed", lease);
       metric("lease.claimed", lease, "claimed");
@@ -188,8 +225,11 @@ export function createHostedJobWorker(input: {
         assertTenant(runtime, lease);
         const thread = parseThread(lease.threadKey);
         const known = await runtime.sessions.get(runtime.tenant, thread);
-        if (known?.engine && known.engine !== "pi")
-          throw new Error(`Hosted worker cannot resume ${known.engine} Session with Pi`);
+        const engineName = runtime.engineName ?? "pi";
+        if (known?.engine && known.engine !== engineName)
+          throw new Error(
+            `Hosted worker cannot resume ${known.engine} Session with ${engineName}`,
+          );
         const options = {
           workingDirectory: runtime.workspaceDirectory,
           ...(runtime.writableDirectories
@@ -207,9 +247,10 @@ export function createHostedJobWorker(input: {
           known,
         });
         let answer = "";
-        const prompt = known?.interrupted || lease.attempt > 1
-          ? `${lease.request}\n\nThe previous Turn was interrupted and may have partially completed. Verify external state before repeating actions.`
-          : lease.request;
+        const prompt =
+          known?.interrupted || lease.attempt > 1
+            ? `${lease.request}\n\nThe previous Turn was interrupted and may have partially completed. Verify external state before repeating actions.`
+            : lease.request;
         for await (const event of session.run(prompt, {
           signal: abort.signal,
           ...(runtime.authorize ? { onApproval: runtime.authorize } : {}),
@@ -233,29 +274,55 @@ export function createHostedJobWorker(input: {
           outcome: "succeeded",
         });
         await input.queue.succeed(lease);
+        if (runtime.engineName === "pi")
+          recordCanaryOutcome({
+            tenantId: lease.tenantId,
+            jobId: lease.id,
+            outcome: "succeeded",
+          });
         log(input.log, "job.succeeded", lease);
-        return { claimed: true, jobId: lease.id, outcome: "succeeded" } as const;
+        return {
+          claimed: true,
+          jobId: lease.id,
+          outcome: "succeeded",
+        } as const;
       } catch (error) {
         await waitForRenewal();
         const actual = renewalFailure ?? error;
         if (isCancellation(actual)) {
           log(input.log, "job.cancelled", lease, actual);
-          return { claimed: true, jobId: lease.id, outcome: "cancelled" } as const;
+          return {
+            claimed: true,
+            jobId: lease.id,
+            outcome: "cancelled",
+          } as const;
         }
         if (actual instanceof LeaseLostError) {
           log(input.log, "job.lease-lost", lease, actual);
           metric("lease.lost", lease, "lost");
-          return { claimed: true, jobId: lease.id, outcome: "lease-lost" } as const;
+          return {
+            claimed: true,
+            jobId: lease.id,
+            outcome: "lease-lost",
+          } as const;
         }
-        const retryable = (input.classifyRetry ?? classifyRetry)(actual) === "retryable";
+        const retryable =
+          (input.classifyRetry ?? classifyRetry)(actual) === "retryable";
         let failed: DurableJob;
         try {
           failed = await input.queue.fail(lease, reason(actual), { retryable });
         } catch (failure) {
           log(input.log, "job.lease-lost", lease, failure);
-          return { claimed: true, jobId: lease.id, outcome: "lease-lost" } as const;
+          return {
+            claimed: true,
+            jobId: lease.id,
+            outcome: "lease-lost",
+          } as const;
         }
-        if (runtime && (failed.status === "failed" || failed.status === "dead-letter")) {
+        if (
+          runtime &&
+          (failed.status === "failed" || failed.status === "dead-letter")
+        ) {
           await runtime.deliverResult({
             idempotencyKey: `job:${lease.id}:result`,
             thread: parseThread(lease.threadKey),
@@ -263,9 +330,21 @@ export function createHostedJobWorker(input: {
             outcome: "failed",
           });
         }
-        log(input.log, retryable ? "job.retrying" : "job.failed", lease, actual);
+        log(
+          input.log,
+          retryable ? "job.retrying" : "job.failed",
+          lease,
+          actual,
+        );
         if (failed.status === "queued") metric("job.retry", lease, "retrying");
-        if (failed.status === "dead-letter") metric("job.dead-letter", lease, "failed");
+        if (failed.status === "dead-letter")
+          metric("job.dead-letter", lease, "failed");
+        if (runtime?.engineName === "pi" && failed.status !== "queued")
+          recordCanaryOutcome({
+            tenantId: lease.tenantId,
+            jobId: lease.id,
+            outcome: "failed",
+          });
         return {
           claimed: true,
           jobId: lease.id,
@@ -282,11 +361,35 @@ export function createHostedJobWorker(input: {
       }
 
       async function waitForRenewal(): Promise<void> {
-        while (renewing) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        while (renewing)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
 
-      function metric(name: OperationalMetricName, job: JobLease, outcome: string): void {
-        input.metrics?.increment(name, { tenantId: job.tenantId, jobId: job.id, outcome });
+      function metric(
+        name: OperationalMetricName,
+        job: JobLease,
+        outcome: string,
+      ): void {
+        input.metrics?.increment(name, {
+          tenantId: job.tenantId,
+          jobId: job.id,
+          outcome,
+        });
+      }
+
+      function recordCanaryOutcome(outcome: CanaryOutcome): void {
+        try {
+          input.recordCanaryOutcome?.(outcome);
+        } catch (error) {
+          input.log?.warn(
+            JSON.stringify({
+              event: "canary.evidence-failed",
+              tenantId: outcome.tenantId,
+              jobId: outcome.jobId,
+              error: redact(reason(error)),
+            }),
+          );
+        }
       }
     },
   };
@@ -302,13 +405,20 @@ function parseThread(value: string): Thread {
 function assertTenant(runtime: HostedJobRuntime, lease: JobLease): void {
   if (runtime.tenant.id !== lease.tenantId)
     throw new Error("Tenant bootstrap returned a different Tenant");
-  if (runtime.engine.sandbox.mode !== "external-tenant-isolation")
-    throw new Error("Hosted Jobs require Pi's external Tenant isolation posture");
+  if (
+    (runtime.engineName ?? "pi") === "pi" &&
+    runtime.engine.sandbox.mode !== "external-tenant-isolation"
+  )
+    throw new Error(
+      "Hosted Jobs require Pi's external Tenant isolation posture",
+    );
 }
 
 function classifyRetry(error: unknown): "retryable" | "terminal" {
   const message = reason(error);
-  return /(?:timeout|timed out|rate limit|429|5\d\d|temporar|connection|socket|econn|network)/i.test(message)
+  return /(?:timeout|timed out|rate limit|429|5\d\d|temporar|connection|socket|econn|network)/i.test(
+    message,
+  )
     ? "retryable"
     : "terminal";
 }
@@ -321,13 +431,20 @@ function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function log(logger: Logger | undefined, event: string, lease: JobLease, error?: unknown): void {
-  logger?.info(JSON.stringify({
-    event,
-    tenantId: lease.tenantId,
-    jobId: lease.id,
-    attempt: lease.attempt,
-    leaseOwner: lease.leaseOwner,
-    ...(error === undefined ? {} : { error: redact(reason(error)) }),
-  }));
+function log(
+  logger: Logger | undefined,
+  event: string,
+  lease: JobLease,
+  error?: unknown,
+): void {
+  logger?.info(
+    JSON.stringify({
+      event,
+      tenantId: lease.tenantId,
+      jobId: lease.id,
+      attempt: lease.attempt,
+      leaseOwner: lease.leaseOwner,
+      ...(error === undefined ? {} : { error: redact(reason(error)) }),
+    }),
+  );
 }

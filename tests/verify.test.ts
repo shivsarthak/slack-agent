@@ -38,6 +38,7 @@ describe("the repository verification seam", () => {
     expect(result.stdout).toContain("[verify] dashboard typecheck");
     expect(result.stdout).toContain("[verify] tests");
     expect(result.stdout).toContain("[verify] migrations");
+    expect(result.stdout).toContain("[verify] rollback rehearsal");
     expect(result.stdout).toContain("[verify] tenant isolation");
     expect(result.stdout).toContain("[verify] encryption");
     expect(result.stdout).toContain("[verify] queue semantics");
@@ -59,6 +60,7 @@ describe("the repository verification seam", () => {
       "--dir dashboard typecheck",
       "test",
       "test:migrations",
+      "test:rollback",
       "test:isolation",
       "test:encryption",
       "test:queue",

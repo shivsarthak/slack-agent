@@ -29,6 +29,7 @@ stage "root typecheck" pnpm typecheck
 stage "dashboard typecheck" pnpm --dir dashboard typecheck
 stage "tests" pnpm test
 stage "migrations" pnpm test:migrations
+stage "rollback rehearsal" pnpm test:rollback
 stage "tenant isolation" pnpm test:isolation
 stage "encryption" pnpm test:encryption
 stage "queue semantics" pnpm test:queue
