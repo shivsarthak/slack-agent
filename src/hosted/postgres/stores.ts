@@ -251,7 +251,7 @@ function tenantStores(pool: Pool, tenantId: TenantId): TenantStores {
       ...jobs,
       async create(values) {
         const result = await pool.query(
-          "insert into jobs (tenant_id, id, thread_key, request) values ($1, $2, $3, $4) returning *",
+          "insert into jobs (tenant_id, id, thread_key, request, idempotency_key) values ($1, $2, $3, $4, $2) returning *",
           [tenantId, values.id, values.threadKey, values.request],
         );
         return jobRecord(first(result));

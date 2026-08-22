@@ -109,7 +109,7 @@ export function postgresSlackHttpPersistence(pool: Pool): SlackHttpPersistence {
         );
         if (claim.rowCount === 0) return false;
         await client.query(
-          "insert into jobs (tenant_id, id, thread_key, request) values ($1, $2, $3, $4)",
+          "insert into jobs (tenant_id, id, thread_key, request, idempotency_key) values ($1, $2, $3, $4, $2)",
           [job.tenant.id, job.id, job.threadKey, job.request],
         );
         return true;

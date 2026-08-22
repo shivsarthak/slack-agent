@@ -148,6 +148,13 @@ export const jobs = pgTable(
     attempt: integer().notNull().default(0),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    leaseToken: uuid("lease_token"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    lastError: text("last_error"),
+    cancelledBy: text("cancelled_by"),
+    cancelledReason: text("cancelled_reason"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    replayOf: text("replay_of"),
     availableAt: timestamp("available_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
