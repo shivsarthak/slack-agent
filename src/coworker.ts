@@ -52,6 +52,27 @@ import { writeScope } from "./writes/classify.ts";
 import { createApprovalCoordinator, type ApprovalClick, type ApprovalClickResult } from "./approvals/coordinator.ts";
 import { approvalStoreFile, openApprovalStore } from "./approvals/store.ts";
 import { createContextualReviewer } from "./approvals/reviewer.ts";
+import type { ContextualReviewer } from "./approvals/policy.ts";
+
+/**
+ * The gate fails closed when the reviewer breaks, which is right — but silently,
+ * which is not: an operator staring at an unexplained "ask (unknown)" needs the
+ * reviewer's actual failure in the log to have any chance of fixing it.
+ */
+function loggedReviewer(reviewer: ContextualReviewer, log: Logger): ContextualReviewer {
+  return {
+    async review(input) {
+      try {
+        const decision = await reviewer.review(input);
+        log.info(`Contextual reviewer decided ${decision.decision}: ${decision.rationale}`);
+        return decision;
+      } catch (error) {
+        log.warn(`Contextual reviewer failed; the gate fails closed to ask: ${reasonFor(error)}`);
+        throw error;
+      }
+    },
+  };
+}
 
 /** A human addressing the coworker with a task, in the wrapper's own terms. */
 export interface Mention {
@@ -128,7 +149,9 @@ export function createCoworker(deps: CoworkerDeps): Coworker {
   const approvals = openApprovalStore({ filePath: approvalStoreFile(deps.config.stateDir) }).then((store) =>
     createApprovalCoordinator({
       config: deps.config.approvals, slack: deps.slack, store, clock: deps.clock, log: deps.log,
-      ...(deps.config.approvals.policy ? { reviewer: createContextualReviewer({ engine: deps.engine, clock: deps.clock }) } : {}),
+      ...(deps.config.approvals.policy
+        ? { reviewer: loggedReviewer(createContextualReviewer({ engine: deps.engine, clock: deps.clock }), deps.log) }
+        : {}),
     }),
   );
   /**

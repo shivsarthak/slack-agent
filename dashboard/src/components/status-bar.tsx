@@ -15,6 +15,7 @@ export interface StatusPayload {
     pid: number | null;
     startedAt: string | null;
     restartRequired: boolean;
+    strayPids: number[];
   };
   counts: { skills: number; notes: number; schedules: number; grants: number };
   recentChanges: { at: string; action: string; subject: string }[];
@@ -95,6 +96,24 @@ export function StatusBar() {
           </Button>
         </div>
       </div>
+      {agent && agent.strayPids.length > 0 && (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>Another agent instance is running outside the supervisor</AlertTitle>
+          <AlertDescription>
+            <span>
+              Process{agent.strayPids.length > 1 ? "es" : ""}{" "}
+              {agent.strayPids.map((pid) => `pid ${pid}`).join(", ")} also connect
+              {agent.strayPids.length > 1 ? "" : "s"} to the Slack app and will answer a share
+              of the mentions with whatever config and code {agent.strayPids.length > 1 ? "they" : "it"} started
+              with. The restart button cannot reach {agent.strayPids.length > 1 ? "them" : "it"} — stop{" "}
+              {agent.strayPids.length > 1 ? "them" : "it"} in the terminal where{" "}
+              {agent.strayPids.length > 1 ? "they were" : "it was"} started, or with{" "}
+              <code>kill {agent.strayPids.join(" ")}</code>.
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
       {agent?.restartRequired && (
         <Alert className="border-warning/50 bg-warning/10 [&>svg]:text-warning">
           <AlertTriangle className="size-4" />

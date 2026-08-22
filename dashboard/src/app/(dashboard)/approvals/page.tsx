@@ -28,8 +28,8 @@ interface Grant {
 
 const MODES = [
   { value: "off", hint: "No gate — everything is allowed." },
-  { value: "coworker", hint: "Workspace-confined work is automatic; boundaries ask." },
-  { value: "external-writes", hint: "Any external mutation asks for approval." },
+  { value: "coworker", hint: "Workspace-confined work is automatic; boundaries ask. The policy below tunes what the LLM reviewer allows." },
+  { value: "external-writes", hint: "Any external mutation asks for approval — the policy below is NOT consulted for external writes in this mode." },
 ] as const;
 
 export default function ApprovalsPage() {
@@ -96,6 +96,12 @@ export default function ApprovalsPage() {
           </div>
           <div className="space-y-2">
             <Label>Policy (natural language, evaluated by the LLM reviewer)</Label>
+            {mode === "external-writes" && (
+              <p className="text-xs text-amber-500">
+                In external-writes mode this policy cannot exempt external mutations — that
+                floor always asks. Switch to coworker mode to let the policy decide.
+              </p>
+            )}
             <Textarea
               className="min-h-[120px]"
               value={policy}

@@ -62,6 +62,22 @@ describe("a Job awaiting approval", () => {
     expect(h.slack.textsIn("1700000000.000100")).toContain("Merged.");
   });
 
+  it("clears Slack's loading indicator while waiting on the human", async () => {
+    const h = await coworkerHarness();
+    h.engine.script = async ({ requestApproval }) => {
+      const decision = await requestApproval(planned());
+      return [{ type: "message", text: decision === "allow" ? "Merged." : "I did not merge." }];
+    };
+    const delivery = await h.startMention({ text: "<@U0COWORKER> merge PR 42" });
+    while (h.slack.approvalPosts.length === 0) await new Promise((resolve) => setImmediate(resolve));
+    // Nothing is being generated while a human decides, so the native indicator —
+    // which Slack renders as a "Generating response…" ghost message — must be off.
+    expect(h.slack.statuses.at(-1)?.status).toBe("");
+    await h.coworker.handleApproval({ requestId: h.slack.approvalPosts[0]!.requestId, userId: "U_ASKER", decision: "approve-once", thread: h.slack.approvalPosts[0]!.thread });
+    if (delivery.accepted) await delivery.completed;
+    expect(h.slack.textsIn("1700000000.000100")).toContain("Merged.");
+  });
+
   it("returns a denial to the engine so it can finish via a safer path", async () => {
     const h = await coworkerHarness();
     h.engine.script = async ({ requestApproval }) => {

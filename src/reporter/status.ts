@@ -152,6 +152,13 @@ export async function startJobStatus(deps: StatusDeps): Promise<JobStatus> {
   let quietUntil = 0;
   let settled = false;
   /**
+   * While a Job waits on a human approval, nothing is being generated — so Slack's
+   * native loading indicator is cleared rather than refreshed. Leaving it beating
+   * shows "Generating response…" under an approval prompt, which reads as the
+   * opposite of what is happening: the coworker is stopped, waiting on the human.
+   */
+  let waitingForApproval = false;
+  /**
    * Writes are chained rather than fired concurrently: two overlapping `chat.update`
    * calls can land out of order, and the one that must land last is the final state.
    */
@@ -195,7 +202,7 @@ export async function startJobStatus(deps: StatusDeps): Promise<JobStatus> {
     try {
       await deps.slack.setStatus({
         thread: deps.thread,
-        status: current.stage === "working" ? nativeStatus(current) : "",
+        status: current.stage === "working" && !waitingForApproval ? nativeStatus(current) : "",
       });
     } catch (error) {
       complain("refresh Slack's status indicator", error);
@@ -279,6 +286,7 @@ export async function startJobStatus(deps: StatusDeps): Promise<JobStatus> {
 
   return {
     async setWaitingForApproval(waiting): Promise<void> {
+      waitingForApproval = waiting;
       bumpActivity(waiting ? { verb: "Waiting for approval", subject: undefined } : undefined);
       await queue("working");
     },
