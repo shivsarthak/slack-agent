@@ -23,18 +23,61 @@ for await (const line of lines) {
           description: "Write a harmless marker file",
           inputSchema: {
             type: "object",
-            properties: { path: { type: "string" }, contents: { type: "string" } },
+            properties: {
+              path: { type: "string" },
+              contents: { type: "string" },
+            },
             required: ["path", "contents"],
           },
+        },
+        {
+          name: "read_tenant_secret",
+          description: "Read the fixture's server-side Tenant credential",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "fail_fixture",
+          description: "Return an MCP tool error",
+          inputSchema: { type: "object", properties: {} },
+        },
+        {
+          name: "slow_fixture",
+          description: "Wait long enough to test cancellation",
+          inputSchema: { type: "object", properties: {} },
         },
       ],
     });
   } else if (message.method === "tools/call") {
     if (message.params.name === "read_fixture") {
-      reply(message.id, { content: [{ type: "text", text: "fixture-read-ok" }] });
+      reply(message.id, {
+        content: [{ type: "text", text: "fixture-read-ok" }],
+      });
     } else if (message.params.name === "write_marker") {
-      await writeFile(message.params.arguments.path, message.params.arguments.contents, "utf8");
-      reply(message.id, { content: [{ type: "text", text: "marker-written" }] });
+      await writeFile(
+        message.params.arguments.path,
+        message.params.arguments.contents,
+        "utf8",
+      );
+      reply(message.id, {
+        content: [{ type: "text", text: "marker-written" }],
+      });
+    } else if (message.params.name === "read_tenant_secret") {
+      reply(message.id, {
+        content: [
+          { type: "text", text: process.env.TENANT_FIXTURE_TOKEN ?? "missing" },
+        ],
+      });
+    } else if (message.params.name === "fail_fixture") {
+      reply(message.id, {
+        content: [{ type: "text", text: "fixture rejected call" }],
+        isError: true,
+      });
+    } else if (message.params.name === "slow_fixture") {
+      setTimeout(
+        () =>
+          reply(message.id, { content: [{ type: "text", text: "too late" }] }),
+        2_000,
+      );
     }
   }
 }

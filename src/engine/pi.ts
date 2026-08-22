@@ -18,6 +18,8 @@ import {
   createHostedLocalTools,
   type HostedToolAuditEntry,
 } from "../hosted/local-tools.ts";
+import { createPiMcpTools, type PiMcpToolSet } from "../mcp/pi-tools.ts";
+import type { McpServerConfig } from "../ports/mcp.ts";
 
 /** The deliberately small surface PiEngine consumes, also used by parity fixtures. */
 export interface PiSessionRuntime {
@@ -35,6 +37,10 @@ export interface PiEngineOptions {
   sessionDirectory: string;
   /** Pi's global configuration/auth directory for this Tenant worker. */
   agentDirectory?: string;
+  /** Already Tenant-scoped server configuration; no global registry is visible here. */
+  mcpServers?: readonly McpServerConfig[];
+  /** Server-side credential source used only while constructing MCP transports. */
+  env?: NodeJS.ProcessEnv;
   /** Durable decision sink supplied by hosted composition. */
   auditToolDecision?:
     | ((entry: HostedToolAuditEntry) => void | Promise<void>)
@@ -56,6 +62,7 @@ const POSTURE: SandboxPosture = {
 
 export function createPiEngine(options: PiEngineOptions): Engine {
   const active = new Map<PiSessionRuntime, EventQueue>();
+  const mcpSets = new Set<PiMcpToolSet>();
   let closed = false;
   const instantiate =
     options.createSession ??
@@ -113,13 +120,29 @@ export function createPiEngine(options: PiEngineOptions): Engine {
             signal: runOptions.signal,
             audit: options.auditToolDecision,
           });
-          const runtime = await instantiate({
-            workingDirectory: sessionOptions.workingDirectory,
-            sessionDirectory: options.sessionDirectory,
-            ...(locator ? { locator } : {}),
-            oneOff,
-            customTools,
+          const mcp = await createPiMcpTools({
+            servers: options.mcpServers ?? [],
+            env: options.env ?? process.env,
+            authorize: runOptions.onApproval,
+            signal: runOptions.signal,
+            audit: options.auditToolDecision,
           });
+          mcpSets.add(mcp);
+          customTools.push(...mcp.tools);
+          let runtime: PiSessionRuntime;
+          try {
+            runtime = await instantiate({
+              workingDirectory: sessionOptions.workingDirectory,
+              sessionDirectory: options.sessionDirectory,
+              ...(locator ? { locator } : {}),
+              oneOff,
+              customTools,
+            });
+          } catch (error) {
+            await mcp.close();
+            mcpSets.delete(mcp);
+            throw error;
+          }
           id = runtime.sessionId;
           opaqueLocator = oneOff
             ? null
@@ -127,6 +150,8 @@ export function createPiEngine(options: PiEngineOptions): Engine {
           if (!oneOff && opaqueLocator === null) {
             runtime.dispose();
             active.delete(runtime);
+            await mcp.close();
+            mcpSets.delete(mcp);
             throw new Error("Pi created a resumable Session without a locator");
           }
           yield {
@@ -184,6 +209,8 @@ export function createPiEngine(options: PiEngineOptions): Engine {
             unsubscribe();
             runtime.dispose();
             active.delete(runtime);
+            await mcp.close();
+            mcpSets.delete(mcp);
           }
         })();
       },
@@ -211,6 +238,8 @@ export function createPiEngine(options: PiEngineOptions): Engine {
       );
       for (const session of active.keys()) session.dispose();
       active.clear();
+      await Promise.all([...mcpSets].map((set) => set.close()));
+      mcpSets.clear();
     },
   };
 }
