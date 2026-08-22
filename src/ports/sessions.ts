@@ -11,6 +11,10 @@ import type { Tenant } from "../tenant.ts";
 export interface SessionRecord {
   /** The engine's identifier for this Thread's Session. */
   id: string;
+  /** Adapter discriminator used by hosted composition when selecting an engine. */
+  engine?: string;
+  /** Opaque engine-owned value used to reopen persisted Session content. */
+  locator?: string;
   /**
    * A Turn started in this Session and was never seen to finish.
    *

@@ -400,6 +400,9 @@ export class FakeEngine implements Engine {
       get id() {
         return id;
       },
+      get locator() {
+        return id;
+      },
       run(prompt: string, runOptions?: RunOptions): AsyncIterable<EngineEvent> {
         const turn: FakeTurn = {
           prompt,

@@ -36,6 +36,8 @@ export function trackTurnDurability(deps: {
   known: SessionRecord | undefined;
 }): TurnDurability {
   let sessionId = deps.known?.id;
+  let engine = deps.known?.engine;
+  let locator = deps.known?.locator;
   let inFlight = deps.known?.interrupted ?? false;
 
   const mark = async (nowInFlight: boolean): Promise<void> => {
@@ -44,6 +46,8 @@ export function trackTurnDurability(deps: {
     inFlight = nowInFlight;
     await deps.sessions.set(deps.tenant, deps.thread, {
       id,
+      ...(engine ? { engine } : {}),
+      ...(locator ? { locator } : {}),
       interrupted: nowInFlight,
     });
   };
@@ -56,6 +60,8 @@ export function trackTurnDurability(deps: {
           // the end of the Job: a crash after this point would otherwise orphan the
           // Session on the engine's disk and start this Thread over from nothing.
           sessionId = event.sessionId;
+          engine = event.engine ?? engine;
+          locator = event.locator ?? locator;
           await mark(true);
           break;
         case "turn-started":

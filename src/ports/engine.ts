@@ -66,7 +66,7 @@ export type ApprovalHandler = (action: PlannedAction, engineSignal?: AbortSignal
  * The App Server adapter translates only stable item and plan notifications.
  */
 export type EngineEvent =
-  | { type: "session-started"; sessionId: string }
+  | { type: "session-started"; sessionId: string; locator?: string; engine?: string }
   | { type: "turn-started" }
   | { type: "message"; text: string }
   | { type: "reasoning"; text: string }
@@ -137,6 +137,8 @@ export interface RunOptions {
 export interface EngineSession {
   /** The engine's own identifier for this Session. Populated once a Turn starts. */
   readonly id: string | null;
+  /** Opaque engine-owned value needed to reopen this Session after restart. */
+  readonly locator: string | null;
   /** Run one Turn, streaming what happens as it happens. */
   run(prompt: string, options?: RunOptions): AsyncIterable<EngineEvent>;
 }
@@ -192,7 +194,7 @@ export interface Engine {
    *
    * Durability is turn-granular: a Session resumes from its last *completed* Turn.
    */
-  resumeSession(sessionId: string, options: SessionOptions): EngineSession;
+  resumeSession(sessionId: string, options: SessionOptions, locator?: string): EngineSession;
   /** Stop the supervised engine process and invalidate every active Turn/request. */
   close(): Promise<void>;
 }

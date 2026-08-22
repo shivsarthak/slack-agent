@@ -47,7 +47,7 @@ import type { Tenant } from "../tenant.ts";
 const storeFileSchema = z.object({
   /** Bumped if the shape changes, so a stale file is recognised rather than misread. */
   version: z.literal(2),
-  sessions: z.record(z.string(), z.object({ id: z.string(), interrupted: z.boolean() })),
+  sessions: z.record(z.string(), z.object({ id: z.string(), engine: z.string().optional(), locator: z.string().optional(), interrupted: z.boolean() })),
 });
 
 type StoreFile = z.infer<typeof storeFileSchema>;
@@ -152,7 +152,15 @@ async function readStore(filePath: string): Promise<Record<string, SessionRecord
     throw unreadable(filePath, validated.error.issues[0]?.message ?? "unrecognised shape");
   }
 
-  return { ...validated.data.sessions };
+  return Object.fromEntries(Object.entries(validated.data.sessions).map(([key, record]) => [
+    key,
+    {
+      id: record.id,
+      ...(record.engine === undefined ? {} : { engine: record.engine }),
+      ...(record.locator === undefined ? {} : { locator: record.locator }),
+      interrupted: record.interrupted,
+    },
+  ]));
 }
 
 function unreadable(filePath: string, problem: string): Error {

@@ -16,7 +16,7 @@ import type { Engine, EngineSession, PlanStep, SessionOptions } from "./ports/en
 import type { Logger } from "./ports/log.ts";
 import type { McpInventoryProber } from "./ports/mcp.ts";
 import type { RepositoryProtectionProbe } from "./ports/repositories.ts";
-import type { SessionStore } from "./ports/sessions.ts";
+import type { SessionRecord, SessionStore } from "./ports/sessions.ts";
 import type { SlackClient } from "./ports/slack.ts";
 import { runPreflight } from "./preflight/run.ts";
 import { startAuditTrail, type AuditTrail } from "./reporter/audit.ts";
@@ -558,7 +558,7 @@ async function runJob(
     const skills = await readSkills(deps.config.skillsDir);
 
     const recorded = await deps.sessions.get(deps.tenant, mention.thread);
-    const session = openSession(deps, mention.thread, recorded?.id, {
+    const session = openSession(deps, mention.thread, recorded, {
       workingDirectory,
       // The Notes and nothing else. **`skillsDir` must never appear here** — that omission
       // is the whole of ADR-0004's authorship rule for Skills, and adding it would make
@@ -872,13 +872,13 @@ function librarianRequest(message: string, files: readonly IngestedFile[]): stri
 function openSession(
   deps: CoworkerDeps,
   thread: Thread,
-  sessionId: string | undefined,
+  recorded: SessionRecord | undefined,
   options: SessionOptions,
 ): EngineSession {
-  if (sessionId === undefined) {
+  if (recorded === undefined) {
     deps.log.info(`Starting a new Session for thread ${thread.ts}`);
     return deps.engine.startSession(options);
   }
-  deps.log.info(`Resuming Session ${sessionId} for thread ${thread.ts}`);
-  return deps.engine.resumeSession(sessionId, options);
+  deps.log.info(`Resuming Session ${recorded.id} for thread ${thread.ts}`);
+  return deps.engine.resumeSession(recorded.id, options, recorded.locator);
 }

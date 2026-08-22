@@ -9,6 +9,7 @@ import { CredentialVault } from "../../src/credentials/vault.ts";
 import { TenantConfigurationVault } from "../../src/credentials/configuration-vault.ts";
 import type { KeyProvider } from "../../src/credentials/envelope.ts";
 import { tenantId } from "../../src/tenant.ts";
+import { postgresSessionStore } from "../../src/hosted/postgres/sessions.ts";
 import { disposablePostgres } from "../support/postgres.ts";
 
 let database: Awaited<ReturnType<typeof disposablePostgres>>;
@@ -20,6 +21,40 @@ beforeAll(async () => {
 afterAll(async () => database.stop());
 
 describe("Tenant-bound PostgreSQL stores", () => {
+  it("keeps resumable engine metadata and interruption Tenant-scoped", async () => {
+    const control = createPostgresStores(database.pool);
+    const alpha = { id: tenantId("10101010-1010-4010-8010-101010101010") };
+    const beta = { id: tenantId("20202020-2020-4020-8020-202020202020") };
+    await control.tenants.create({ id: alpha.id, name: "Session Alpha" });
+    await control.tenants.create({ id: beta.id, name: "Session Beta" });
+    const store = postgresSessionStore(database.pool);
+    const thread = { channel: "C_SHARED", ts: "123.456" };
+
+    await store.set(alpha, thread, {
+      id: "pi-alpha",
+      engine: "pi",
+      locator: "/tenants/alpha/sessions/pi-alpha.jsonl",
+      interrupted: true,
+    });
+    await expect(store.get(beta, thread)).resolves.toBeUndefined();
+    await expect(store.get(alpha, thread)).resolves.toEqual({
+      id: "pi-alpha",
+      engine: "pi",
+      locator: "/tenants/alpha/sessions/pi-alpha.jsonl",
+      interrupted: true,
+    });
+
+    await store.set(alpha, thread, {
+      id: "pi-alpha",
+      engine: "pi",
+      locator: "/tenants/alpha/sessions/pi-alpha.jsonl",
+      interrupted: false,
+    });
+    await expect(store.get(alpha, thread)).resolves.toMatchObject({
+      interrupted: false,
+    });
+  });
+
   it("persists only encrypted Tenant configuration and credentials across rotation and revocation", async () => {
     const control = createPostgresStores(database.pool);
     const alpha = tenantId("11111111-1111-4111-8111-111111111111");

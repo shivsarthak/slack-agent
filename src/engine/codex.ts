@@ -36,6 +36,7 @@ export async function createCodexEngine(options: CodexEngineOptions): Promise<En
     let id: string | null = existingId ?? null;
     return {
       get id() { return id; },
+      get locator() { return id; },
       run(prompt, runOptions = {}) {
         return (async function* (): AsyncGenerator<EngineEvent> {
           const roots = [sessionOptions.workingDirectory, ...(sessionOptions.writableDirectories ?? [])];
@@ -52,7 +53,7 @@ export async function createCodexEngine(options: CodexEngineOptions): Promise<En
             ? await rpc.request("thread/start", { ...common, ephemeral }) as { thread: { id: string } }
             : await rpc.request("thread/resume", { ...common, threadId: existingId }) as { thread: { id: string } };
           id = response.thread.id;
-          yield { type: "session-started", sessionId: id };
+          yield { type: "session-started", sessionId: id, locator: id, engine: "codex" };
           const events = rpc.openTurn(id, runOptions.onApproval, sessionOptions.workingDirectory);
           let turnId: string | undefined;
           const abort = (): void => { if (turnId) void rpc.request("turn/interrupt", { threadId: id, turnId }).catch(() => {}); };
@@ -286,7 +287,7 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-function translate(method: string, params: Record<string, unknown>, usage?: import("../ports/engine.ts").TokenUsage): EngineEvent[] {
+export function normalizeCodexEvent(method: string, params: Record<string, unknown>, usage?: import("../ports/engine.ts").TokenUsage): EngineEvent[] {
   if (method === "turn/started") return [{ type: "turn-started" }];
   if (method === "turn/plan/updated") return [{ type: "plan", steps: ((params.plan as { step?: string; status?: string }[]) ?? []).map((step) => ({ text: String(step.step ?? ""), completed: step.status === "completed" })) }];
   if (method === "turn/completed") {
@@ -299,6 +300,8 @@ function translate(method: string, params: Record<string, unknown>, usage?: impo
   const item = params.item as Record<string, unknown> | undefined; if (!item) return [];
   return translateItem(item, method === "item/completed" ? "completed" : "in-progress");
 }
+
+const translate = normalizeCodexEvent;
 
 function translateItem(item: Record<string, unknown>, status: ActivityStatus): EngineEvent[] {
   switch (item.type) {
