@@ -17,7 +17,7 @@ a mention goes in, one message keeps you posted on the plan and the step it is o
 action it takes out in the world is appended to the thread permanently, and an answer
 comes back into the same thread — where a follow-up days later resumes the same
 conversation without you restating anything. Each thread gets its own session and
-is never handed another thread's — though it is not yet *prevented* from going and
+is never handed another thread's — though it is not yet _prevented_ from going and
 reading one, which is measured and written down in
 [ADR-0003](docs/adr/0003-vault-is-the-memory.md). It now remembers, in Markdown you own
 (below), and follows procedures you write down for it.
@@ -86,6 +86,9 @@ cp open-agent.config.example.json open-agent.config.json    # optional, see belo
 cp mcp.example.json mcp.json                                # optional MCP servers
 pnpm start
 ```
+
+For the scalable hosted topology behind local HTTPS, see
+[Docker Compose deployment](docs/deployment.md).
 
 To run under the supervisor (required for the admin dashboard's restart button):
 

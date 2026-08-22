@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env --experimental-strip-types src/index.ts",
-    "format:check": "prettier --check package.json dashboard/package.json scripts/verify-compose.mjs tests/verify.test.ts",
+    "format:check": "prettier --check package.json dashboard/package.json scripts/verify-compose.mjs scripts/verify-deployment.mjs tests/verify.test.ts tests/container-policy/compose.test.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -20,6 +20,12 @@
     "test:queue": "vitest run tests/queue.test.ts tests/postgres-job-queue.test.ts",
     "test:container-policy": "vitest run tests/container-policy",
     "compose:check": "node scripts/verify-compose.mjs",
+    "deployment:health": "node scripts/verify-deployment.mjs health",
+    "deployment:migration": "node scripts/verify-deployment.mjs migration",
+    "deployment:replica": "node scripts/verify-deployment.mjs replica",
+    "deployment:isolation": "node scripts/verify-deployment.mjs isolation",
+    "deployment:smoke": "sh scripts/verify-topology-smoke.sh",
+    "deployment:fake-integration": "vitest run tests/postgres-job-queue.test.ts tests/hosted-worker.test.ts",
     "test:smoke": "vitest run tests/coworker.test.ts"
   },
   "dependencies": {

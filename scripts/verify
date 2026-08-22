@@ -34,6 +34,12 @@ stage "encryption" pnpm test:encryption
 stage "queue semantics" pnpm test:queue
 stage "launcher and container policy" pnpm test:container-policy
 stage "Compose validation" pnpm compose:check
+stage "deployment health" pnpm deployment:health
+stage "deployment migration" pnpm deployment:migration
+stage "deployment replicas" pnpm deployment:replica
+stage "deployment fake integration" pnpm deployment:fake-integration
+stage "deployment Docker isolation" pnpm deployment:isolation
+stage "deployment topology smoke" pnpm deployment:smoke
 stage "fake-service smoke" pnpm test:smoke
 
 printf '[verify] all stages passed\n'

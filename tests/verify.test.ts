@@ -43,6 +43,12 @@ describe("the repository verification seam", () => {
     expect(result.stdout).toContain("[verify] queue semantics");
     expect(result.stdout).toContain("[verify] launcher and container policy");
     expect(result.stdout).toContain("[verify] Compose validation");
+    expect(result.stdout).toContain("[verify] deployment health");
+    expect(result.stdout).toContain("[verify] deployment migration");
+    expect(result.stdout).toContain("[verify] deployment replicas");
+    expect(result.stdout).toContain("[verify] deployment fake integration");
+    expect(result.stdout).toContain("[verify] deployment Docker isolation");
+    expect(result.stdout).toContain("[verify] deployment topology smoke");
     expect(result.stdout).toContain("[verify] fake-service smoke");
 
     expect((await readFile(fake.log, "utf8")).trim().split("\n")).toEqual([
@@ -58,6 +64,12 @@ describe("the repository verification seam", () => {
       "test:queue",
       "test:container-policy",
       "compose:check",
+      "deployment:health",
+      "deployment:migration",
+      "deployment:replica",
+      "deployment:fake-integration",
+      "deployment:isolation",
+      "deployment:smoke",
       "test:smoke",
     ]);
   });

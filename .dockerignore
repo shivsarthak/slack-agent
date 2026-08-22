@@ -1,0 +1,8 @@
+.git
+.scratch
+.test-tmp
+node_modules
+dashboard/node_modules
+dashboard/.next
+.env
+*.log
