@@ -131,9 +131,14 @@ export function createPostgresJobQueue(
       );
     },
 
-    async fail(lease: JobLease, error: string): Promise<DurableJob> {
+    async fail(
+      lease: JobLease,
+      error: string,
+      options: { retryable?: boolean } = {},
+    ): Promise<DurableJob> {
       const at = now();
-      const terminal = lease.attempt >= 3;
+      const retryable = options.retryable ?? true;
+      const exhausted = lease.attempt >= 3;
       const available = new Date(
         at.getTime() + retryBaseMs * 2 ** (lease.attempt - 1),
       );
@@ -142,7 +147,11 @@ export function createPostgresJobQueue(
           pool,
           lease,
           `status=$4, last_error=$5, available_at=$6, lease_owner=null, lease_expires_at=null, lease_token=null, updated_at=$3`,
-          [terminal ? "dead-letter" : "queued", error, available],
+          [
+            exhausted ? "dead-letter" : retryable ? "queued" : "failed",
+            error,
+            available,
+          ],
           at,
         ),
       );

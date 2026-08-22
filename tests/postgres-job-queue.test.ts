@@ -131,6 +131,23 @@ describe("durable PostgreSQL job queue", () => {
     expect(failed.attempt).toBe(3);
   });
 
+  it("records a classified terminal failure without retrying", async () => {
+    const queue = createPostgresJobQueue(pool);
+    await queue.enqueue({
+      tenantId,
+      id: "terminal",
+      threadKey: "c:terminal",
+      request: "invalid configuration",
+      idempotencyKey: "terminal",
+    });
+    const claimed = (await queue.claim("worker", 30_000))!;
+    const failed = await queue.fail(claimed, "invalid Tenant configuration", {
+      retryable: false,
+    });
+    expect(failed.status).toBe("failed");
+    expect(await queue.claim("another-worker", 30_000)).toBeUndefined();
+  });
+
   it("cancels work durably and makes dead-letter replay auditable", async () => {
     const queue = createPostgresJobQueue(pool);
     await queue.enqueue({

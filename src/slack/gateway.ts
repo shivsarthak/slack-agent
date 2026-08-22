@@ -179,6 +179,9 @@ export function slackClientFor(app: App, botToken: string): SlackClient {
       const result = await app.client.chat.postMessage({
         channel: message.thread.channel,
         thread_ts: message.thread.ts,
+        ...(message.idempotencyKey
+          ? { client_msg_id: message.idempotencyKey }
+          : {}),
         ...(message.format === "markdown"
           ? { markdown_text: message.text }
           : { text: message.text }),

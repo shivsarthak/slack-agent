@@ -15,6 +15,8 @@ export interface PostMessage {
   text: string;
   /** Model answers use standard Markdown; app-authored messages use Slack mrkdwn. */
   format?: "markdown" | "mrkdwn";
+  /** Slack deduplicates retries carrying the same client-generated identifier. */
+  idempotencyKey?: string;
 }
 
 export interface PostedMessage {
