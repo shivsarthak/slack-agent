@@ -88,5 +88,6 @@ describe("Tenant credential vault", () => {
 
     await vault.revoke("openai");
     await expect(vault.read("openai")).resolves.toBeUndefined();
+    expect(persistence.records.get("alpha:openai")?.version).toBe(3);
   });
 });

@@ -34,6 +34,7 @@ function credential(row: QueryResultRow): EncryptedCredentialRecord {
     kind: String(row.kind) as CredentialKind,
     version: Number(row.version),
     envelope: envelope(row.encrypted_value),
+    ...(row.expires_at ? { expiresAt: new Date(row.expires_at) } : {}),
     ...(row.revoked_at ? { revokedAt: new Date(row.revoked_at) } : {}),
     updatedAt: new Date(row.updated_at),
   };
@@ -53,16 +54,17 @@ export function postgresCredentialPersistence(
     async save(record, expectedVersion) {
       const result = await pool.query(
         `insert into credentials
-          (tenant_id, id, kind, encrypted_value, key_version, version, revoked_at, updated_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8)
+          (tenant_id, id, kind, encrypted_value, key_version, version, expires_at, revoked_at, updated_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          on conflict (tenant_id, id) do update set
           encrypted_value = excluded.encrypted_value,
           key_version = excluded.key_version,
           version = excluded.version,
+          expires_at = excluded.expires_at,
           revoked_at = excluded.revoked_at,
           updated_at = excluded.updated_at
          where credentials.kind = excluded.kind
-           and credentials.version = $9`,
+           and credentials.version = $10`,
         [
           record.tenantId,
           record.id,
@@ -70,6 +72,7 @@ export function postgresCredentialPersistence(
           JSON.stringify(record.envelope),
           record.envelope.keyVersion,
           record.version,
+          record.expiresAt ?? null,
           record.revokedAt ?? null,
           record.updatedAt,
           expectedVersion ?? 0,

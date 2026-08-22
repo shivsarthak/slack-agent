@@ -14,6 +14,7 @@ export interface EncryptedCredentialRecord {
   readonly kind: CredentialKind;
   readonly version: number;
   readonly envelope: EncryptedEnvelope;
+  readonly expiresAt?: Date;
   readonly revokedAt?: Date;
   readonly updatedAt: Date;
 }
@@ -35,6 +36,17 @@ export interface ActiveCredential {
   readonly secret: string;
   readonly version: number;
   readonly keyVersion: number;
+  readonly expiresAt?: Date;
+}
+
+export interface CredentialMetadata {
+  readonly id: string;
+  readonly kind: CredentialKind;
+  readonly version: number;
+  readonly keyVersion: number;
+  readonly expiresAt?: Date;
+  readonly revokedAt?: Date;
+  readonly updatedAt: Date;
 }
 
 function subject(kind: CredentialKind, id: string): string {
@@ -60,6 +72,7 @@ export class CredentialVault {
     id: string;
     kind: CredentialKind;
     secret: string;
+    expiresAt?: Date;
   }): Promise<void> {
     if (input.id.trim() === "")
       throw new Error("Credential id must not be empty");
@@ -80,6 +93,7 @@ export class CredentialVault {
           subject(input.kind, input.id),
           input.secret,
         ),
+        ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
         updatedAt: new Date(),
       },
       previous?.version,
@@ -100,7 +114,23 @@ export class CredentialVault {
       ),
       version: record.version,
       keyVersion: record.envelope.keyVersion,
+      ...(record.expiresAt ? { expiresAt: record.expiresAt } : {}),
     };
+  }
+
+  async inspect(id: string): Promise<CredentialMetadata | undefined> {
+    const record = await this.persistence.get(this.tenantId, id);
+    return record
+      ? {
+          id: record.id,
+          kind: record.kind,
+          version: record.version,
+          keyVersion: record.envelope.keyVersion,
+          ...(record.expiresAt ? { expiresAt: record.expiresAt } : {}),
+          ...(record.revokedAt ? { revokedAt: record.revokedAt } : {}),
+          updatedAt: record.updatedAt,
+        }
+      : undefined;
   }
 
   async rotateEncryption(id: string): Promise<void> {
@@ -116,6 +146,7 @@ export class CredentialVault {
     await this.persistence.save(
       {
         ...record,
+        version: record.version + 1,
         envelope: await encryptEnvelope(
           this.keys,
           this.tenantId,
@@ -132,7 +163,12 @@ export class CredentialVault {
     const record = await this.persistence.get(this.tenantId, id);
     if (!record || record.revokedAt) return;
     await this.persistence.save(
-      { ...record, revokedAt: new Date(), updatedAt: new Date() },
+      {
+        ...record,
+        version: record.version + 1,
+        revokedAt: new Date(),
+        updatedAt: new Date(),
+      },
       record.version,
     );
   }

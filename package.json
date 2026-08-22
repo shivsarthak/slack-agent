@@ -5,7 +5,7 @@
   "description": "An AI coworker that lives in our Slack workspace",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19"
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env --experimental-strip-types src/index.ts",
@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@date-fns/tz": "1.4.1",
+    "@earendil-works/pi-ai": "0.84.2",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",

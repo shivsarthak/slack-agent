@@ -11,11 +11,11 @@ const globalAuth = globalThis as typeof globalThis & {
   openAgentLastMagicLink?: MailMessage;
 };
 
-const pool =
+export const dashboardPool =
   globalAuth.openAgentDashboardPool ??
   new Pool({ connectionString: process.env.DATABASE_URL });
 if (process.env.NODE_ENV !== "production")
-  globalAuth.openAgentDashboardPool = pool;
+  globalAuth.openAgentDashboardPool = dashboardPool;
 
 const developmentMail: MailPort = {
   async send(message) {
@@ -30,7 +30,7 @@ const developmentMail: MailPort = {
 };
 
 export const dashboardAuth = createDashboardAuth({
-  pool,
+  pool: dashboardPool,
   mail: developmentMail,
   publicUrl: process.env.DASHBOARD_PUBLIC_URL ?? "http://localhost:3100",
 });

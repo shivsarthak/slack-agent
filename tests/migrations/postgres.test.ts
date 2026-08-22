@@ -30,6 +30,7 @@ describe("hosted PostgreSQL migrations", () => {
         "slack_oauth_states",
         "slack_deliveries",
         "credentials",
+        "openai_codex_onboarding_attempts",
         "tenant_configurations",
         "jobs",
         "sessions",
@@ -72,6 +73,7 @@ describe("hosted PostgreSQL migrations", () => {
         "0003_encrypted_tenant_configuration.sql",
         "0004_slack_http_ingress.sql",
         "0005_durable_job_queue.sql",
+        "0006_openai_codex_onboarding.sql",
       ]);
     } finally {
       await upgrade.stop();

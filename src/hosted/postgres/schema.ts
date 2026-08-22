@@ -126,6 +126,25 @@ export const credentials = pgTable(
   },
   (table) => [primaryKey({ columns: [table.tenantId, table.id] })],
 );
+export const openaiCodexOnboardingAttempts = pgTable(
+  "openai_codex_onboarding_attempts",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    id: uuid().notNull(),
+    initiatedByUserId: uuid("initiated_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    status: text().notNull(),
+    verificationUrl: text("verification_url"),
+    userCode: text("user_code"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    failure: text(),
+    ...timestamps,
+  },
+  (table) => [primaryKey({ columns: [table.tenantId, table.id] })],
+);
 export const tenantConfigurations = pgTable("tenant_configurations", {
   tenantId: uuid("tenant_id")
     .primaryKey()
