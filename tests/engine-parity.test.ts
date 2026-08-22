@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { EngineEvent } from "../src/ports/engine.ts";
+import type { EngineEvent, PlannedAction } from "../src/ports/engine.ts";
 import { createPiEngine, type PiSessionRuntime } from "../src/engine/pi.ts";
 import { normalizePiEvent } from "../src/engine/pi.ts";
 import { normalizeCodexEvent } from "../src/engine/codex.ts";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { testTempDir } from "./support/test-root.ts";
 
 class ScriptedPiSession implements PiSessionRuntime {
   readonly sessionId = "pi-session-1";
@@ -126,11 +128,19 @@ describe("Engine parity", () => {
   });
 
   it("normalizes a Pi turn into the repository Engine vocabulary", async () => {
-    const opened: Array<{ locator: string | undefined; cwd: string }> = [];
+    const opened: Array<{
+      locator: string | undefined;
+      cwd: string;
+      tools: string[];
+    }> = [];
     const engine = createPiEngine({
       sessionDirectory: "/tenant/sessions",
-      createSession: async ({ locator, workingDirectory }) => {
-        opened.push({ locator, cwd: workingDirectory });
+      createSession: async ({ locator, workingDirectory, customTools }) => {
+        opened.push({
+          locator,
+          cwd: workingDirectory,
+          tools: customTools.map((tool) => tool.name),
+        });
         return new ScriptedPiSession();
       },
     });
@@ -169,9 +179,48 @@ describe("Engine parity", () => {
         .run("again"),
     );
     expect(opened).toEqual([
-      { locator: undefined, cwd: "/tenant/work" },
-      { locator: "/tenant/sessions/pi-session-1.jsonl", cwd: "/tenant/work" },
+      {
+        locator: undefined,
+        cwd: "/tenant/work",
+        tools: ["read", "list", "find", "grep", "write", "edit", "bash"],
+      },
+      {
+        locator: "/tenant/sessions/pi-session-1.jsonl",
+        cwd: "/tenant/work",
+        tools: ["read", "list", "find", "grep", "write", "edit", "bash"],
+      },
     ]);
+  });
+
+  it("bridges Pi mutations to the Turn approval handler", async () => {
+    const workingDirectory = await testTempDir("pi-tools-");
+    let tools: ToolDefinition[] = [];
+    const engine = createPiEngine({
+      sessionDirectory: "/tenant/sessions",
+      createSession: async (options) => {
+        tools = options.customTools;
+        return new ScriptedPiSession();
+      },
+    });
+    const decisions: PlannedAction[] = [];
+    await collect(
+      engine.startSession({ workingDirectory }).run("work", {
+        onApproval: async (action) => {
+          decisions.push(action);
+          return "deny";
+        },
+      }),
+    );
+    const write = tools.find((tool) => tool.name === "write")!;
+    const result = await write.execute(
+      "call",
+      { path: "marker", content: "no" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    expect(result).toMatchObject({ isError: true });
+    expect(decisions).toHaveLength(1);
   });
 
   it("aborts the Pi session and rejects iteration when the wrapper cancels", async () => {

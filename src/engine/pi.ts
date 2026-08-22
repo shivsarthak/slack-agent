@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   createAgentSession,
   SessionManager,
+  type ToolDefinition,
   VERSION,
 } from "@earendil-works/pi-coding-agent";
 import type {
@@ -13,6 +14,10 @@ import type {
   SessionOptions,
   TokenUsage,
 } from "../ports/engine.ts";
+import {
+  createHostedLocalTools,
+  type HostedToolAuditEntry,
+} from "../hosted/local-tools.ts";
 
 /** The deliberately small surface PiEngine consumes, also used by parity fixtures. */
 export interface PiSessionRuntime {
@@ -30,11 +35,16 @@ export interface PiEngineOptions {
   sessionDirectory: string;
   /** Pi's global configuration/auth directory for this Tenant worker. */
   agentDirectory?: string;
+  /** Durable decision sink supplied by hosted composition. */
+  auditToolDecision?:
+    | ((entry: HostedToolAuditEntry) => void | Promise<void>)
+    | undefined;
   createSession?: (options: {
     workingDirectory: string;
     sessionDirectory: string;
     locator?: string;
     oneOff: boolean;
+    customTools: ToolDefinition[];
   }) => Promise<PiSessionRuntime>;
 }
 
@@ -49,7 +59,13 @@ export function createPiEngine(options: PiEngineOptions): Engine {
   let closed = false;
   const instantiate =
     options.createSession ??
-    (async ({ workingDirectory, sessionDirectory, locator, oneOff }) => {
+    (async ({
+      workingDirectory,
+      sessionDirectory,
+      locator,
+      oneOff,
+      customTools,
+    }) => {
       const manager = oneOff
         ? SessionManager.inMemory(workingDirectory)
         : locator
@@ -64,6 +80,8 @@ export function createPiEngine(options: PiEngineOptions): Engine {
         ...(options.agentDirectory ? { agentDir: options.agentDirectory } : {}),
         sessionManager: manager,
         noTools: "all",
+        tools: customTools.map((tool) => tool.name),
+        customTools,
       });
       return result.session;
     });
@@ -86,11 +104,21 @@ export function createPiEngine(options: PiEngineOptions): Engine {
       run(prompt, runOptions = {}) {
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (closed) throw new Error("PiEngine is closed");
+          const customTools = createHostedLocalTools({
+            roots: [
+              sessionOptions.workingDirectory,
+              ...(sessionOptions.writableDirectories ?? []),
+            ],
+            authorize: runOptions.onApproval,
+            signal: runOptions.signal,
+            audit: options.auditToolDecision,
+          });
           const runtime = await instantiate({
             workingDirectory: sessionOptions.workingDirectory,
             sessionDirectory: options.sessionDirectory,
             ...(locator ? { locator } : {}),
             oneOff,
+            customTools,
           });
           id = runtime.sessionId;
           opaqueLocator = oneOff
