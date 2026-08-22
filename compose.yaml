@@ -1,0 +1,29 @@
+services:
+  control-plane:
+    image: open-agent-control-plane@sha256:63db330a79d33afc8e61dbb7bfe72c16ca1a84b11dd998916e243f289ec68992
+    volumes:
+      - launcher-socket:/run/open-agent
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  worker-launcher:
+    image: open-agent-launcher@sha256:167d92965f360f28a7e9cb544acfd81cf56d2f07f82853446b830c40cc872c71
+    volumes:
+      - launcher-socket:/run/open-agent
+      - /var/run/docker.sock:/var/run/docker.sock
+      # These paths are deliberately identical inside the launcher and on the Docker
+      # host: bind sources in Engine API requests are resolved by the daemon, not by
+      # this container.
+      - /srv/open-agent/tenants:/srv/open-agent/tenants
+      - /run/open-agent/credentials:/run/open-agent/credentials
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  launcher-socket:

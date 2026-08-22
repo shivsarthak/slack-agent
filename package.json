@@ -18,7 +18,7 @@
     "test:isolation": "vitest run tests/workspace-lifecycle.test.ts tests/vault.test.ts tests/sessions-store.test.ts tests/isolation",
     "test:encryption": "vitest run tests/encryption",
     "test:queue": "vitest run tests/queue.test.ts tests/postgres-job-queue.test.ts",
-    "test:container-policy": "vitest run --passWithNoTests 'tests/container-policy/**/*.test.ts'",
+    "test:container-policy": "vitest run tests/container-policy",
     "compose:check": "node scripts/verify-compose.mjs",
     "test:smoke": "vitest run tests/coworker.test.ts"
   },
