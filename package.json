@@ -15,7 +15,7 @@
     "test:watch": "vitest",
     "test:contract": "vitest run --config vitest.contract.config.ts",
     "test:migrations": "vitest run tests/migrations/postgres.test.ts",
-    "test:isolation": "vitest run tests/workspace-lifecycle.test.ts tests/vault.test.ts tests/sessions-store.test.ts tests/isolation/postgres-stores.test.ts",
+    "test:isolation": "vitest run tests/workspace-lifecycle.test.ts tests/vault.test.ts tests/sessions-store.test.ts tests/isolation",
     "test:encryption": "vitest run tests/encryption",
     "test:queue": "vitest run tests/queue.test.ts",
     "test:container-policy": "vitest run --passWithNoTests 'tests/container-policy/**/*.test.ts'",
