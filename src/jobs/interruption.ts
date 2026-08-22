@@ -1,6 +1,7 @@
 import type { EngineEvent } from "../ports/engine.ts";
 import type { SessionRecord, SessionStore } from "../ports/sessions.ts";
 import type { Thread } from "../thread.ts";
+import type { Tenant } from "../tenant.ts";
 
 /**
  * Whether this Thread has a Turn in flight — written down, so that "in flight when
@@ -29,18 +30,26 @@ export interface TurnDurability {
 
 export function trackTurnDurability(deps: {
   sessions: SessionStore;
+  tenant: Tenant;
   thread: Thread;
   /** What this Thread already had recorded, so an unchanged flag is not rewritten. */
   known: SessionRecord | undefined;
 }): TurnDurability {
   let sessionId = deps.known?.id;
+  let engine = deps.known?.engine;
+  let locator = deps.known?.locator;
   let inFlight = deps.known?.interrupted ?? false;
 
   const mark = async (nowInFlight: boolean): Promise<void> => {
     const id = sessionId;
     if (id === undefined || inFlight === nowInFlight) return;
     inFlight = nowInFlight;
-    await deps.sessions.set(deps.thread, { id, interrupted: nowInFlight });
+    await deps.sessions.set(deps.tenant, deps.thread, {
+      id,
+      ...(engine ? { engine } : {}),
+      ...(locator ? { locator } : {}),
+      interrupted: nowInFlight,
+    });
   };
 
   return {
@@ -51,6 +60,8 @@ export function trackTurnDurability(deps: {
           // the end of the Job: a crash after this point would otherwise orphan the
           // Session on the engine's disk and start this Thread over from nothing.
           sessionId = event.sessionId;
+          engine = event.engine ?? engine;
+          locator = event.locator ?? locator;
           await mark(true);
           break;
         case "turn-started":

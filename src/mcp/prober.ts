@@ -24,21 +24,28 @@ const PROBE_TIMEOUT_MS = 30_000;
  * stdio process lifecycle, and shutdown. This adapter owns only the project-specific part:
  * turning a validated `mcp.json` server entry into the matching SDK transport.
  */
-export function createMcpInventoryProber(env: NodeJS.ProcessEnv): McpInventoryProber {
+export function createMcpInventoryProber(
+  env: NodeJS.ProcessEnv,
+): McpInventoryProber {
   return {
     async probe(server: McpServerConfig): Promise<McpInventory> {
       const client = new Client(
         { name: "open-agent-preflight", version: "0.1.0" },
         // HTTP can negotiate in place. A legacy stdio probe can require a second spawned
         // process under `auto`, so keep stdio on the SDK's compatible legacy handshake.
-        server.transport === "http" ? { versionNegotiation: { mode: "auto" } } : {},
+        server.transport === "http"
+          ? { versionNegotiation: { mode: "auto" } }
+          : {},
       );
       const transport = transportFor(server, env);
-      const timeout = (server.startupTimeoutSec ?? PROBE_TIMEOUT_MS / 1_000) * 1_000;
+      const timeout =
+        (server.startupTimeoutSec ?? PROBE_TIMEOUT_MS / 1_000) * 1_000;
 
       try {
         await client.connect(transport, { timeout });
-        const result = await client.listTools(undefined, { timeout: PROBE_TIMEOUT_MS });
+        const result = await client.listTools(undefined, {
+          timeout: PROBE_TIMEOUT_MS,
+        });
         return { tools: result.tools.map((tool) => tool.name) };
       } finally {
         await client.close().catch(() => undefined);
@@ -47,7 +54,10 @@ export function createMcpInventoryProber(env: NodeJS.ProcessEnv): McpInventoryPr
   };
 }
 
-function transportFor(server: McpServerConfig, env: NodeJS.ProcessEnv): Transport {
+export function transportFor(
+  server: McpServerConfig,
+  env: NodeJS.ProcessEnv,
+): Transport {
   return server.transport === "http"
     ? httpTransport(server, env)
     : stdioTransport(server, env);
@@ -71,7 +81,9 @@ function httpTransport(
             token: async () => requiredEnv(env, bearerTokenEnvVar, server.name),
           },
         }),
-    ...(Object.keys(server.httpHeaders).length + Object.keys(server.envHttpHeaders).length === 0
+    ...(Object.keys(server.httpHeaders).length +
+      Object.keys(server.envHttpHeaders).length ===
+    0
       ? {}
       : { requestInit: { headers } }),
   });
@@ -99,7 +111,11 @@ function stdioTransport(
   });
 }
 
-function requiredEnv(env: NodeJS.ProcessEnv, variable: string, server: string): string {
+function requiredEnv(
+  env: NodeJS.ProcessEnv,
+  variable: string,
+  server: string,
+): string {
   const value = env[variable]?.trim();
   if (value === undefined || value === "") {
     throw new Error(

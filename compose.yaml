@@ -1,0 +1,152 @@
+x-app: &app
+  build: { context: ., target: runtime }
+  image: open-agent-runtime:local
+  init: true
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  environment: &app-environment
+    DATABASE_URL: postgresql://${POSTGRES_USER:-open_agent}:${POSTGRES_PASSWORD:-development-only}@postgres:5432/${POSTGRES_DB:-open_agent}
+    S3_ENDPOINT: http://object-storage:9000
+    S3_BUCKET: ${S3_BUCKET:-open-agent}
+    S3_ACCESS_KEY: ${MINIO_ROOT_USER:-open_agent}
+    S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-development-only}
+    SMTP_URL: smtp://mail-sink:1025
+    CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+    CREDENTIAL_ENCRYPTION_KEY_VERSION: ${CREDENTIAL_ENCRYPTION_KEY_VERSION:-1}
+
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports: ["${HTTPS_PORT:-8443}:443", "${HTTP_PORT:-8080}:80"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      control-plane: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, wget, --spider, http://control-plane:3100/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  control-plane:
+    <<: *app
+    build: { context: ., target: dashboard }
+    image: open-agent-control-plane:local
+    command: [node, dashboard/node_modules/next/dist/bin/next, start, dashboard, -p, "3100"]
+    environment:
+      <<: *app-environment
+      HOSTNAME: 0.0.0.0
+      PORT: 3100
+      LAUNCHER_SOCKET: /run/open-agent/launcher.sock
+      AUTH_ORIGIN: ${AUTH_ORIGIN:-https://localhost:8443}
+    volumes:
+      - launcher-socket:/run/open-agent
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      object-storage: { condition: service_healthy }
+      mail-sink: { condition: service_healthy }
+      worker-launcher: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, wget, --spider, http://localhost:3100/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-open_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-open_agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development-only}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 30s
+
+  object-storage:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: [server, /data, --console-address, ":9001"]
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-open_agent}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-development-only}
+    volumes: [object-storage-data:/data]
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mail-sink:
+    image: axllent/mailpit:v1.27.8
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    healthcheck:
+      test: [CMD, /mailpit, readyz]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *app
+    restart: "no"
+    command: [node, --experimental-strip-types, src/hosted/runtime.ts, migrate]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  worker-launcher:
+    <<: *app
+    user: "0:0"
+    command: [node, --experimental-strip-types, src/hosted/runtime.ts, launcher]
+    environment:
+      <<: *app-environment
+      LAUNCHER_SOCKET: /run/open-agent/launcher.sock
+      TENANTS_ROOT: ${TENANTS_ROOT:-/srv/open-agent/tenants}
+      CREDENTIALS_ROOT: /run/open-agent/credentials
+    volumes:
+      - launcher-socket:/run/open-agent
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: ${TENANTS_ROOT:-/srv/open-agent/tenants}
+        target: ${TENANTS_ROOT:-/srv/open-agent/tenants}
+    healthcheck:
+      test: [CMD, node, --experimental-strip-types, src/hosted/runtime.ts, launcher-health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 30s
+
+  worker:
+    <<: *app
+    command: [node, --experimental-strip-types, src/hosted/runtime.ts, worker]
+    environment:
+      <<: *app-environment
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      object-storage: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, wget, --spider, http://127.0.0.1:8081/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 30s
+
+volumes:
+  caddy-data:
+  caddy-config:
+  postgres-data:
+  object-storage-data:
+  launcher-socket:

@@ -17,7 +17,7 @@ a mention goes in, one message keeps you posted on the plan and the step it is o
 action it takes out in the world is appended to the thread permanently, and an answer
 comes back into the same thread — where a follow-up days later resumes the same
 conversation without you restating anything. Each thread gets its own session and
-is never handed another thread's — though it is not yet *prevented* from going and
+is never handed another thread's — though it is not yet _prevented_ from going and
 reading one, which is measured and written down in
 [ADR-0003](docs/adr/0003-vault-is-the-memory.md). It now remembers, in Markdown you own
 (below), and follows procedures you write down for it.
@@ -29,6 +29,13 @@ official MCP server; its remaining work is live end-to-end verification
 ([build/09](.scratch/slack-coworker/build/09-github-connector.md)). Linear needs no
 connector-specific implementation: its `mcp.json` entry uses the same generic MCP
 configuration, preflight, deny-list, and audit path as every other connector.
+
+The default `coworker` Approval Gate keeps routine reads, edits, tests, and bounded
+goal-aligned work autonomous while pausing exact consequential or unknown actions in the
+originating Thread. The person who delegated the Job can Approve once, Allow similar in
+this Thread, or Deny. `external-writes` is the stricter option; explicit `off` preserves the
+former unattended behavior. See [configuration](docs/configuration.md#approvals) and
+[ADR-0008](docs/adr/0008-goal-aware-approval-gate.md).
 
 Configured GitHub repositories are also checked for the server-side default-branch
 boundary. Missing protection warns and continues, distinguishing a fixable missing rule
@@ -64,6 +71,10 @@ Our Slack app requires `files:read` for attachments, `files:write` for result up
 transfer ceilings default to 20 MiB and
 are configurable under `fileTransfer`.
 
+Enable **Interactivity** for the Slack app. Approval buttons arrive through the existing
+Socket Mode connection, so no public request URL is needed. The handler acknowledges the
+button delivery immediately and resolves the held action asynchronously.
+
 ## Running it
 
 You need Node 20+, [pnpm](https://pnpm.io), and a Codex login (`codex login`).
@@ -76,6 +87,31 @@ cp mcp.example.json mcp.json                                # optional MCP serve
 pnpm start
 ```
 
+For the scalable hosted topology behind local HTTPS, see
+[Docker Compose deployment](docs/deployment.md).
+
+To run under the supervisor (required for the admin dashboard's restart button):
+
+```bash
+sh scripts/run-agent.sh
+```
+
+## Admin dashboard
+
+A Next.js admin UI lives in [`dashboard/`](dashboard/). It reads and writes the same
+files the agent uses — config, MCP registry, operating manual, Skills — and shows
+status, vault Notes, the change log, schedules, and approval grants.
+
+```bash
+cd dashboard && pnpm install && pnpm dev     # http://localhost:3100
+```
+
+Auth is a single admin password from `ADMIN_PASSWORD` (in `dashboard/.env.local` or the
+environment). If unset, a random password is generated and logged at startup. Config and
+`mcp.json` edits show a "restart required" banner; the restart button signals the
+supervisor started by `scripts/run-agent.sh` (it writes `.state/agent.pid` and respawns
+the agent). Operating-manual and Skill edits apply to the next job without a restart.
+
 **`.env` holds credentials and nothing else.** `open-agent.config.json` describes the
 instance — the Vault, bounds, model, and the path to `mcp.json`.
 `mcp.json` is the one extensible registry for every MCP server. It supports remote
@@ -87,7 +123,7 @@ with a Vault and no connectors. See [docs/configuration.md](docs/configuration.m
 connector is found before the first mention. MCP servers may add or remove tools without
 blocking startup.
 
-The instance keeps Session mappings and Schedules under `.state/`. Conversations live on
+The instance keeps Session mappings, Schedules, and Thread-scoped approval grants under `.state/`. Conversations live on
 Codex's disk and Notes live in the Vault. Deleting `sessions.json` makes every Thread start
 over; deleting `schedules.json` permanently removes every configured Schedule.
 
@@ -209,7 +245,7 @@ how you find out what changed when something breaks overnight.
 ```bash
 pnpm test          # the default suite: fast, no network, no Codex
 pnpm typecheck
-pnpm test:contract # slow, opt-in: runs a real `codex exec`
+pnpm test:contract # slow, opt-in: runs a real Codex App Server
 ```
 
 `pnpm test` drives the whole coworker through one seam at the top — a fake Slack, a
@@ -219,8 +255,9 @@ files on disk, and the prompt the engine received. A test should still pass if t
 internals were rewritten, and should fail if our experience changed.
 
 **`pnpm test:contract` is how a Codex version bump gets validated.** It runs a real
-`codex exec` and asserts the things a fake cannot honestly assert — that the JSONL
-event stream still translates into the events this wrapper expects. It costs tokens,
+`codex app-server` and asserts the things a fake cannot honestly assert — that stdio
+JSON-RPC requests hold exact actions before execution and that events still translate into
+the wrapper vocabulary. It costs tokens,
 needs working Codex credentials, and is excluded from `pnpm test`. Because there is
 no version pin, run it against whatever version is installed rather than only at a
 deliberate bump: it is the only thing standing between an upstream alpha and an

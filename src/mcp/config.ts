@@ -63,7 +63,7 @@ const RESERVED_HTTP_HEADERS = new Set([
   "mcp-session-id",
 ]);
 
-const mcpFileSchema = z
+export const mcpFileSchema = z
   .object({
     $schema: z.string().optional(),
     mcpServers: z.record(

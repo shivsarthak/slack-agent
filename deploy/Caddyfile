@@ -1,0 +1,12 @@
+{
+	admin off
+}
+
+https://localhost {
+	tls internal
+	reverse_proxy control-plane:3100
+}
+
+http://localhost {
+	redir https://{host}{uri} permanent
+}

@@ -1,0 +1,36 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Docker Engine policy translation > has no escape hatch for caller-supplied Docker fields 1`] = `
+{
+  "Cmd": [
+    "run",
+  ],
+  "Entrypoint": [
+    "/worker",
+  ],
+  "Env": [
+    "SECRET_FILE=/run/secret",
+  ],
+  "HostConfig": {
+    "AutoRemove": false,
+    "Binds": [
+      "/tenant/a:/work/tenant:rw",
+    ],
+    "CapDrop": [
+      "ALL",
+    ],
+    "Memory": 1024,
+    "NanoCpus": 1000,
+    "NetworkMode": "none",
+    "PidsLimit": 10,
+    "ReadonlyRootfs": true,
+    "SecurityOpt": [
+      "no-new-privileges:true",
+    ],
+  },
+  "Image": "worker@sha256:fixed",
+  "Labels": {
+    "owner": "launcher",
+  },
+}
+`;

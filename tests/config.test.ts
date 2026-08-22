@@ -71,6 +71,29 @@ describe("the configuration file", () => {
     expect(config.engine.reasoningEffort).toBe("low");
     expect(config.fileTransfer).toEqual(FILE_TRANSFER_DEFAULTS);
     expect(config.workspaceRetention).toEqual(WORKSPACE_RETENTION_DEFAULTS);
+    expect(config.approvals).toEqual({ mode: "coworker", rules: [] });
+  });
+
+  it("loads strict approval modes, policy, and deterministic rules", async () => {
+    const { filePath } = await configFile({
+      approvals: {
+        mode: "external-writes",
+        policy: "Creating pull requests in acme/shop is allowed.",
+        rules: [{ source: "mcp", server: "github", tool: "create_pull_request", scope: "acme/shop", decision: "allow" }],
+      },
+    });
+
+    const config = await loadConfig({ ...SLACK_TOKENS, CONFIG_PATH: filePath });
+    expect(config.approvals.mode).toBe("external-writes");
+    expect(config.approvals.policy).toContain("acme/shop");
+    expect(config.approvals.rules).toHaveLength(1);
+  });
+
+  it("refuses unknown approval modes and keys", async () => {
+    const badMode = await configFile({ approvals: { mode: "all-writes" } } as unknown as ConfigFile);
+    await expect(loadConfig({ ...SLACK_TOKENS, CONFIG_PATH: badMode.filePath })).rejects.toThrow("approvals.mode");
+    const badKey = await configFile({ approvals: { mode: "coworker", unknownMeansAllow: true } } as unknown as ConfigFile);
+    await expect(loadConfig({ ...SLACK_TOKENS, CONFIG_PATH: badKey.filePath })).rejects.toThrow("unknownMeansAllow");
   });
 
   it("takes the inactive workspace lifetime from the instance file", async () => {

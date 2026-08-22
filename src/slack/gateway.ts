@@ -15,8 +15,17 @@ import type {
   UpdateMessage,
   UploadedFile,
   UploadFile,
+  ApprovalPost,
+  SettleApproval,
+  EphemeralMessage,
+} from "../ports/slack.ts";
+import {
+  ALLOW_SIMILAR_ACTION,
+  APPROVE_ONCE_ACTION,
+  DENY_ACTION,
 } from "../ports/slack.ts";
 import { toMentionFile, type MentionGateway } from "./mentions.ts";
+import type { ApprovalClick, ApprovalClickResult, HumanApprovalDecision } from "../approvals/coordinator.ts";
 
 /**
  * Bolt, Socket Mode, and the `app_mention` subscription.
@@ -170,6 +179,9 @@ export function slackClientFor(app: App, botToken: string): SlackClient {
       const result = await app.client.chat.postMessage({
         channel: message.thread.channel,
         thread_ts: message.thread.ts,
+        ...(message.idempotencyKey
+          ? { client_msg_id: message.idempotencyKey }
+          : {}),
         ...(message.format === "markdown"
           ? { markdown_text: message.text }
           : { text: message.text }),
@@ -178,6 +190,43 @@ export function slackClientFor(app: App, botToken: string): SlackClient {
         throw new Error("Slack accepted the message but returned no ts");
       }
       return { ts: result.ts };
+    },
+
+    async postApproval(message: ApprovalPost): Promise<PostedMessage> {
+      const fields = [
+        `*Action:* ${message.category}`,
+        `*Target:* ${message.target}`,
+        `*Environment:* ${message.environment}`,
+        `*Effect:* ${message.effect}`,
+        `*Preview:* \`${message.preview.replaceAll("`", "ˋ")}\``,
+        `*Risk:* ${message.risk}`,
+        `*Why:* ${message.reason}`,
+        `*Allow similar scope:* ${message.grantScope}`,
+        "The Job is paused on this exact action.",
+      ].join("\n");
+      const result = await app.client.chat.postMessage({
+        channel: message.thread.channel, thread_ts: message.thread.ts,
+        text: `Approval required for ${message.category} on ${message.target}. The Job is paused.`,
+        blocks: [
+          { type: "header", text: { type: "plain_text", text: "Approval required" } },
+          { type: "section", text: { type: "mrkdwn", text: fields } },
+          { type: "actions", elements: [
+            { type: "button", action_id: APPROVE_ONCE_ACTION, text: { type: "plain_text", text: "Approve once" }, value: message.requestId, style: "primary" },
+            { type: "button", action_id: ALLOW_SIMILAR_ACTION, text: { type: "plain_text", text: "Allow similar in this Thread" }, value: message.requestId },
+            { type: "button", action_id: DENY_ACTION, text: { type: "plain_text", text: "Deny" }, value: message.requestId, style: "danger" },
+          ] },
+        ],
+      });
+      if (!result.ts) throw new Error("Slack accepted the approval message but returned no ts");
+      return { ts: result.ts };
+    },
+
+    async settleApproval(message: SettleApproval): Promise<void> {
+      await app.client.chat.update({ channel: message.thread.channel, ts: message.ts, text: message.text, blocks: [{ type: "section", text: { type: "mrkdwn", text: message.text } }] });
+    },
+
+    async postEphemeral(message: EphemeralMessage): Promise<void> {
+      await app.client.chat.postEphemeral({ channel: message.thread.channel, thread_ts: message.thread.ts, user: message.userId, text: message.text });
     },
 
     async updateMessage(message: UpdateMessage): Promise<void> {
@@ -218,4 +267,30 @@ export function subscribeToMentions(app: App, mentions: MentionGateway, log: Log
       });
     }
   });
+}
+
+export function subscribeToApprovalActions(
+  app: App,
+  decide: (click: ApprovalClick) => Promise<ApprovalClickResult>,
+  log: Logger,
+): void {
+  const actions: readonly [string, HumanApprovalDecision][] = [
+    [APPROVE_ONCE_ACTION, "approve-once"],
+    [ALLOW_SIMILAR_ACTION, "allow-similar"],
+    [DENY_ACTION, "deny"],
+  ];
+  for (const [actionId, decision] of actions) {
+    app.action(actionId, async ({ ack, action, body }) => {
+      await ack();
+      const requestId = "value" in action && typeof action.value === "string" ? action.value : "";
+      const userId = "user" in body && body.user && "id" in body.user ? String(body.user.id) : "";
+      const channel = "channel" in body && body.channel && "id" in body.channel ? String(body.channel.id) : "";
+      const ts = "message" in body && body.message && "thread_ts" in body.message
+        ? String(body.message.thread_ts ?? "")
+        : "";
+      void decide({ requestId, userId, decision, thread: { channel, ts } }).catch((error: unknown) => {
+        log.warn(`Approval action ${actionId} failed after acknowledgement: ${String(error)}`);
+      });
+    });
+  }
 }

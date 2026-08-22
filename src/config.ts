@@ -114,6 +114,46 @@ const boundsSchema = z.object({
 
 export type Bounds = z.infer<typeof boundsSchema>;
 
+export const approvalModeSchema = z.enum(["off", "coworker", "external-writes"]);
+export type ApprovalMode = z.infer<typeof approvalModeSchema>;
+
+const approvalRuleSchema = z
+  .object({
+    source: z.enum(["command", "file-change", "permission", "mcp"]),
+    commandPrefix: z.array(z.string().min(1)).min(1).optional(),
+    server: z.string().min(1).optional(),
+    tool: z.string().min(1).optional(),
+    scope: z.string().min(1).optional(),
+    environment: z.string().min(1).optional(),
+    decision: z.enum(["allow", "ask", "deny"]),
+  })
+  .strict()
+  .superRefine((rule, ctx) => {
+    if (rule.source === "command" && rule.commandPrefix === undefined) {
+      ctx.addIssue({ code: "custom", message: "command rules require commandPrefix" });
+    }
+    if (rule.source === "command" && (rule.server !== undefined || rule.tool !== undefined)) {
+      ctx.addIssue({ code: "custom", message: "command rules cannot name MCP server/tool" });
+    }
+    if (rule.source === "mcp" && (rule.server === undefined || rule.tool === undefined)) {
+      ctx.addIssue({ code: "custom", message: "MCP rules require exact server and tool" });
+    }
+    if (rule.source === "mcp" && rule.commandPrefix !== undefined) {
+      ctx.addIssue({ code: "custom", message: "MCP rules cannot use commandPrefix" });
+    }
+    if ((rule.source === "file-change" || rule.source === "permission") &&
+      (rule.commandPrefix !== undefined || rule.server !== undefined || rule.tool !== undefined)) {
+      ctx.addIssue({ code: "custom", message: `${rule.source} rules accept only scope/environment constraints` });
+    }
+  });
+
+export type ApprovalRule = z.infer<typeof approvalRuleSchema>;
+export interface ApprovalConfig {
+  mode: ApprovalMode;
+  policy?: string | undefined;
+  rules: readonly ApprovalRule[];
+}
+
 export interface Config {
   /** Where this configuration came from, in words, for the startup line. */
   source: string;
@@ -180,6 +220,7 @@ export interface Config {
   repositories: readonly string[];
   /** The connector-owned credential variable used only by the read-only safety probe. */
   repositoryProtectionTokenEnvVar: string | undefined;
+  approvals: ApprovalConfig;
 }
 
 /**
@@ -189,7 +230,7 @@ export interface Config {
  * that parsed and did nothing would be an instance running with a bound its operator
  * believes they set. Every unknown key is named and refused.
  */
-const configFileSchema = z
+export const configFileSchema = z
   .object({
     slack: z
       .object({
@@ -231,6 +272,14 @@ const configFileSchema = z
       // each field's own default, so "no `engine` section" and "an empty one" agree.
       .prefault({}),
     bounds: boundsSchema.partial().strict().prefault({}),
+    approvals: z
+      .object({
+        mode: approvalModeSchema.default("coworker"),
+        policy: z.string().min(1).optional(),
+        rules: z.array(approvalRuleSchema).default([]),
+      })
+      .strict()
+      .prefault({}),
     fileTransfer: z
       .object({
         maxDownloadBytes: z.number().int().positive().optional(),
@@ -350,6 +399,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     mcpConfigSource: mcp.source,
     repositories: file.repositories,
     repositoryProtectionTokenEnvVar: github?.bearerTokenEnvVar,
+    approvals: file.approvals,
   };
 }
 

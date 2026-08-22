@@ -67,8 +67,9 @@ alone and `skills` follows it.
 "stateDir": "./.state"
 ```
 
-Durable wrapper state. Session mappings and the atomically replaced `schedules.json` live
-here, along with the append-only `vault-changes.jsonl` server log. Each Vault record is one
+Durable wrapper state. Session mappings, the atomically replaced `schedules.json`, and
+Thread grants/inactive approval IDs in `approvals.json` live here, along with the append-only
+`vault-changes.jsonl` server log. Each Vault record is one
 JSON object containing the
 timestamp, action, Note path, originating Thread and Job, optional attribution detail, and
 the full available diff. Vault bookkeeping is not posted into Slack; external Write
@@ -130,6 +131,42 @@ files from earlier replies in the same Thread through `conversations.replies`.
 across many shallow Jobs; if considered answers come back thin, this is the first dial to
 turn, not the prompt.
 
+### `approvals`
+
+```json
+"approvals": {
+  "mode": "coworker",
+  "policy": "Creating pull requests in acme/shop is ordinary when the Job requests one.",
+  "rules": []
+}
+```
+
+The default is `coworker`: proven reads and ordinary reversible work that matches the
+delegated Job proceed silently; consequence boundaries, out-of-goal actions, and unknowns
+pause in the same Slack Thread. `external-writes` additionally asks before every external
+mutation unless a narrow explicit allow or Thread Grant matches. `off` explicitly restores
+the previous unattended posture and produces no approval UI. There is no `all-writes` mode.
+
+Optional `policy` is trusted natural-language guidance for an isolated contextual reviewer.
+It may allow or tighten ordinary workflows, but cannot weaken disabled tools, fixed
+consequence boundaries, or explicit `ask`/`deny` rules. Reviewer failures and ambiguity ask.
+
+Rules are strict data. A command rule uses an argument-array `commandPrefix`; an MCP rule
+uses exact `server` and `tool`; optional `scope` and `environment` narrow either. `decision`
+is `allow`, `ask`, or `deny`. Deny, fixed boundaries, and ask outrank grants and allows.
+Unknown keys stop startup.
+
+An approval message offers exactly Approve once, Allow similar in this Thread, and Deny.
+Only the Job's delegator or Schedule creator can decide. Similar grants are deterministic,
+narrow, confined to that Thread, and stored under `stateDir` outside the Vault and Job
+workspaces. They never become blanket network, MCP-server, or App Server Session access.
+Approval waiting uses `bounds.turnTimeoutMs`; Stop and expiry invalidate the buttons.
+
+Approval is not a replacement for capability boundaries. Keep credentials read-only where
+possible, especially for databases: a textual `SELECT` over a write-capable credential is
+not proof of read-only behavior. Disabled MCP tools, repository protection, hooks, and
+service-side authorization remain independently effective.
+
 ### `mcpConfig` and `mcp.json`
 
 `mcpConfig` points to the one MCP registry and defaults to `./mcp.json`:
@@ -179,8 +216,9 @@ Codex Apps/connectors are a separate tool source and are enabled by Codex by def
 engine disables that source for Jobs, so separately authorized apps cannot add tools outside
 this registry; only the MCP servers validated from `mcp.json` are exposed.
 
-Codex resolves connector credentials for MCP calls because the wrapper is not in that tool
-path. The one exception is the read-only GitHub repository-protection check: startup
+Codex resolves connector credentials for MCP calls. In guarded modes App Server intercepts
+configured invocations for the Approval Gate while execution and results remain between
+Codex and the server. The one exception is the read-only GitHub repository-protection check: startup
 resolves the GitHub connector's bearer token to call the repository and rules endpoints
 described below.
 
@@ -218,10 +256,10 @@ Thread?"** A wrong comment is embarrassing and stays available; Linear's `save_i
 upsert and stays available too, because drawing that line at argument granularity is not
 something the tool path can express.
 
-The fixed floor covers tool names already reviewed by this project. It does not infer that a
-new tool is dangerous from its name or MCP annotations. New capabilities are allowed by
-default; operators can add tool names to `disabledTools` without maintaining a complete
-inventory.
+The fixed floor covers tool names already reviewed by this project. Every discovered tool
+is approval-intercepted in guarded modes; incomplete annotations never prove a read, and an
+action that cannot be classified becomes a prompt. Operators can still add tool names to
+`disabledTools` to remove them entirely.
 
 ### `repositories`
 

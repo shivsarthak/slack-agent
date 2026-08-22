@@ -10,7 +10,9 @@ describe("the official MCP client adapter", () => {
       transport: "stdio",
       enabled: true,
       command: process.execPath,
-      args: [path.resolve(import.meta.dirname, "fixtures", "mcp-stdio-server.mjs")],
+      args: [
+        path.resolve(import.meta.dirname, "fixtures", "mcp-stdio-server.mjs"),
+      ],
       env: {},
       envVars: [],
       disabledTools: [],
@@ -18,6 +20,12 @@ describe("the official MCP client adapter", () => {
 
     const inventory = await createMcpInventoryProber(process.env).probe(server);
 
-    expect(inventory.tools).toEqual(["read_fixture"]);
+    expect(inventory.tools).toEqual([
+      "read_fixture",
+      "write_marker",
+      "read_tenant_secret",
+      "fail_fixture",
+      "slow_fixture",
+    ]);
   });
 });

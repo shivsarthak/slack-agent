@@ -1,10 +1,9 @@
 /**
- * The engine seam mandated by ADR-0001.
+ * The engine seam retained by ADR-0008.
  *
  * Everything below is the *wrapper's* vocabulary. No Codex type appears here, and
- * no module outside `src/engine/` may import `@openai/codex-sdk` — so a later move
- * from `codex exec` to `app-server` is a bounded rewrite of the adapter rather than
- * a change that spreads through the Job runner and the Reporter.
+ * no module outside `src/engine/` knows Codex App Server protocol types. The
+ * transport, process lifecycle, and JSON-RPC variants remain a bounded adapter detail.
  */
 
 export type ActivityStatus = "in-progress" | "completed" | "failed";
@@ -26,15 +25,48 @@ export interface TokenUsage {
   reasoningOutputTokens: number;
 }
 
+export type ActionSource = "command" | "file-change" | "permission" | "mcp";
+export type ActionEffect = "read" | "local-mutation" | "external-mutation" | "consequential" | "unknown";
+
+export interface ActionTarget {
+  service: string;
+  resource: string;
+  environment: string;
+}
+
+/** One exact operation held by the engine before it executes. */
+export interface PlannedAction {
+  id: string;
+  source: ActionSource;
+  operation: string;
+  target: ActionTarget;
+  arguments: unknown;
+  workingDirectory?: string | undefined;
+  preview: string;
+  effect: ActionEffect;
+  risk: string;
+  grantScope: string;
+}
+
+/** Trusted authorization supplied by the wrapper, never inferred from tool output. */
+export interface GoalContext {
+  request: string;
+  trustedHumanMessages: readonly string[];
+  threadKey: string;
+  requesterUserId: string;
+  workspaceDirectory: string;
+}
+
+export type ApprovalHandler = (action: PlannedAction, engineSignal?: AbortSignal) => Promise<"allow" | "deny">;
+
 /**
  * What the engine did, in terms the rest of the system understands.
  *
- * Progress is item-level, not token-level: `codex exec` deliberately drops every
- * delta notification, so there is nothing finer to translate. The one exception is
- * `plan`, which the engine revises as it works.
+ * Progress remains item-level so the Slack reporter does not inherit token-delta churn.
+ * The App Server adapter translates only stable item and plan notifications.
  */
 export type EngineEvent =
-  | { type: "session-started"; sessionId: string }
+  | { type: "session-started"; sessionId: string; locator?: string; engine?: string }
   | { type: "turn-started" }
   | { type: "message"; text: string }
   | { type: "reasoning"; text: string }
@@ -97,12 +129,16 @@ export interface RunOptions {
    * is better than the one the abort carries.
    */
   signal?: AbortSignal | undefined;
+  /** Called synchronously with execution: the action remains pending until it resolves. */
+  onApproval?: ApprovalHandler | undefined;
 }
 
 /** One Session — the coworker's accumulated understanding of one Thread. */
 export interface EngineSession {
   /** The engine's own identifier for this Session. Populated once a Turn starts. */
   readonly id: string | null;
+  /** Opaque engine-owned value needed to reopen this Session after restart. */
+  readonly locator: string | null;
   /** Run one Turn, streaming what happens as it happens. */
   run(prompt: string, options?: RunOptions): AsyncIterable<EngineEvent>;
 }
@@ -158,5 +194,7 @@ export interface Engine {
    *
    * Durability is turn-granular: a Session resumes from its last *completed* Turn.
    */
-  resumeSession(sessionId: string, options: SessionOptions): EngineSession;
+  resumeSession(sessionId: string, options: SessionOptions, locator?: string): EngineSession;
+  /** Stop the supervised engine process and invalidate every active Turn/request. */
+  close(): Promise<void>;
 }

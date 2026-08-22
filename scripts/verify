@@ -1,0 +1,46 @@
+#!/bin/sh
+set -u
+
+cd "$(dirname "$0")/.."
+
+stage() {
+  name=$1
+  shift
+  printf '[verify] %s\n' "$name"
+  if ! "$@"; then
+    printf '[verify] FAILED: %s\n' "$name" >&2
+    exit 1
+  fi
+}
+
+install_dependencies() {
+  # Some CI and Builder checkouts themselves live below the operating system's TMPDIR.
+  # Give the security tests a narrower temp root so their repo-local fixtures do not
+  # inherit the sandbox's special writable-temp grant.
+  mkdir -p .test-tmp/system || return
+  TMPDIR=$PWD/.test-tmp/system
+  export TMPDIR
+  CI=true pnpm install --frozen-lockfile && CI=true pnpm --dir dashboard install --frozen-lockfile
+}
+
+stage "dependencies" install_dependencies
+stage "formatting" pnpm format:check
+stage "root typecheck" pnpm typecheck
+stage "dashboard typecheck" pnpm --dir dashboard typecheck
+stage "tests" pnpm test
+stage "migrations" pnpm test:migrations
+stage "rollback rehearsal" pnpm test:rollback
+stage "tenant isolation" pnpm test:isolation
+stage "encryption" pnpm test:encryption
+stage "queue semantics" pnpm test:queue
+stage "launcher and container policy" pnpm test:container-policy
+stage "Compose validation" pnpm compose:check
+stage "deployment health" pnpm deployment:health
+stage "deployment migration" pnpm deployment:migration
+stage "deployment replicas" pnpm deployment:replica
+stage "deployment fake integration" pnpm deployment:fake-integration
+stage "deployment Docker isolation" pnpm deployment:isolation
+stage "deployment topology smoke" pnpm deployment:smoke
+stage "fake-service smoke" pnpm test:smoke
+
+printf '[verify] all stages passed\n'

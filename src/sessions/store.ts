@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import type { SessionRecord, SessionStore } from "../ports/sessions.ts";
 import type { Thread } from "../thread.ts";
+import type { Tenant } from "../tenant.ts";
 
 /**
  * The Session mapping, kept in one JSON file.
@@ -46,10 +47,7 @@ import type { Thread } from "../thread.ts";
 const storeFileSchema = z.object({
   /** Bumped if the shape changes, so a stale file is recognised rather than misread. */
   version: z.literal(2),
-  sessions: z.record(
-    z.string(),
-    z.object({ id: z.string(), interrupted: z.boolean() }),
-  ),
+  sessions: z.record(z.string(), z.object({ id: z.string(), engine: z.string().optional(), locator: z.string().optional(), interrupted: z.boolean() })),
 });
 
 type StoreFile = z.infer<typeof storeFileSchema>;
@@ -89,19 +87,25 @@ export async function openSessionStore(options: SessionStoreOptions): Promise<Se
   let lastWrite: Promise<void> = Promise.resolve();
 
   return {
-    async get(thread: Thread): Promise<SessionRecord | undefined> {
-      const recorded = sessions[keyFor(thread)];
+    async get(tenant: Tenant, thread: Thread): Promise<SessionRecord | undefined> {
+      // S02 added Tenant to the digest. Fall back to the former Thread-only key so an
+      // existing self-hosted installation resumes its Sessions; its next write naturally
+      // records the tenant-aware key without making startup a migration operation.
+      const recorded = sessions[keyFor(tenant, thread)] ?? sessions[legacyKeyFor(thread)];
       return recorded === undefined ? undefined : { ...recorded };
     },
 
-    set(thread: Thread, record: SessionRecord): Promise<void> {
-      const key = keyFor(thread);
+    set(tenant: Tenant, thread: Thread, record: SessionRecord): Promise<void> {
+      const key = keyFor(tenant, thread);
       lastWrite = lastWrite
         // The previous write's failure is its own caller's to report, not this one's.
         .catch(() => {})
         .then(async () => {
           const next = { ...sessions, [key]: record };
-          await writeStore(filePath, { version: CURRENT_VERSION, sessions: next });
+          await writeStore(filePath, {
+            version: CURRENT_VERSION,
+            sessions: next,
+          });
           // Only now: a `get` must never claim a Session that is not on disk.
           sessions[key] = record;
         });
@@ -118,7 +122,11 @@ export async function openSessionStore(options: SessionStoreOptions): Promise<Se
  * a character that appears in neither, so two different Threads cannot collide by
  * concatenation.
  */
-function keyFor(thread: Thread): string {
+function keyFor(tenant: Tenant, thread: Thread): string {
+  return createHash("sha256").update(`${tenant.id}\0${thread.channel}\0${thread.ts}`).digest("hex");
+}
+
+function legacyKeyFor(thread: Thread): string {
   return createHash("sha256").update(`${thread.channel}\0${thread.ts}`).digest("hex");
 }
 
@@ -144,7 +152,15 @@ async function readStore(filePath: string): Promise<Record<string, SessionRecord
     throw unreadable(filePath, validated.error.issues[0]?.message ?? "unrecognised shape");
   }
 
-  return { ...validated.data.sessions };
+  return Object.fromEntries(Object.entries(validated.data.sessions).map(([key, record]) => [
+    key,
+    {
+      id: record.id,
+      ...(record.engine === undefined ? {} : { engine: record.engine }),
+      ...(record.locator === undefined ? {} : { locator: record.locator }),
+      interrupted: record.interrupted,
+    },
+  ]));
 }
 
 function unreadable(filePath: string, problem: string): Error {

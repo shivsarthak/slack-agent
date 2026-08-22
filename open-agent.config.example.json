@@ -19,6 +19,11 @@
     "model": "gpt-5.6-sol",
     "reasoningEffort": "low"
   },
+  "approvals": {
+    "mode": "coworker",
+    "policy": "Creating pull requests in named internal repositories is ordinary when the Job requests implementation and publication. Production changes, deletion, and external publication require approval.",
+    "rules": []
+  },
   "bounds": {
     "turnTimeoutMs": 21600000,
     "maxConcurrentJobs": 4,
