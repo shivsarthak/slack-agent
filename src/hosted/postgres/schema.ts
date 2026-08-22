@@ -91,15 +91,22 @@ export const credentials = pgTable(
     kind: text().notNull(),
     encryptedValue: text("encrypted_value").notNull(),
     keyVersion: integer("key_version").notNull(),
+    version: integer().notNull().default(1),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     ...timestamps,
   },
-  (table) => [
-    primaryKey({ columns: [table.tenantId, table.id] }),
-    unique().on(table.tenantId, table.kind),
-  ],
+  (table) => [primaryKey({ columns: [table.tenantId, table.id] })],
 );
+export const tenantConfigurations = pgTable("tenant_configurations", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  version: integer().notNull(),
+  encryptedValue: text("encrypted_value").notNull(),
+  keyVersion: integer("key_version").notNull(),
+  ...timestamps,
+});
 export const jobs = pgTable(
   "jobs",
   {

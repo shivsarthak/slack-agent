@@ -28,6 +28,7 @@ describe("hosted PostgreSQL migrations", () => {
         "dashboard_sessions",
         "slack_installations",
         "credentials",
+        "tenant_configurations",
         "jobs",
         "sessions",
         "schedules",
@@ -66,6 +67,7 @@ describe("hosted PostgreSQL migrations", () => {
         "0000_hosted_state.sql",
         "0001_tenant_membership_integrity.sql",
         "0002_dashboard_identity.sql",
+        "0003_encrypted_tenant_configuration.sql",
       ]);
     } finally {
       await upgrade.stop();

@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../../src/hosted/postgres/migrate.ts";
 import { createPostgresStores } from "../../src/hosted/postgres/stores.ts";
+import {
+  postgresConfigurationPersistence,
+  postgresCredentialPersistence,
+} from "../../src/hosted/postgres/secrets.ts";
+import { CredentialVault } from "../../src/credentials/vault.ts";
+import { TenantConfigurationVault } from "../../src/credentials/configuration-vault.ts";
+import type { KeyProvider } from "../../src/credentials/envelope.ts";
 import { tenantId } from "../../src/tenant.ts";
 import { disposablePostgres } from "../support/postgres.ts";
 
@@ -13,6 +20,73 @@ beforeAll(async () => {
 afterAll(async () => database.stop());
 
 describe("Tenant-bound PostgreSQL stores", () => {
+  it("persists only encrypted Tenant configuration and credentials across rotation and revocation", async () => {
+    const control = createPostgresStores(database.pool);
+    const alpha = tenantId("11111111-1111-4111-8111-111111111111");
+    const beta = tenantId("22222222-2222-4222-8222-222222222222");
+    await control.tenants.create({ id: alpha, name: "Secret Alpha" });
+    await control.tenants.create({ id: beta, name: "Secret Beta" });
+    let currentVersion = 1;
+    const material = new Map<number, Uint8Array>([
+      [1, new Uint8Array(32).fill(11)],
+    ]);
+    const keys: KeyProvider = {
+      async currentVersion() {
+        return currentVersion;
+      },
+      async key(version) {
+        const key = material.get(version);
+        if (!key) throw new Error("unknown test key");
+        return key;
+      },
+    };
+    const credentials = postgresCredentialPersistence(database.pool);
+    const configurations = postgresConfigurationPersistence(database.pool);
+    const alphaCredentials = new CredentialVault(alpha, keys, credentials);
+    const betaCredentials = new CredentialVault(beta, keys, credentials);
+    const alphaConfiguration = new TenantConfigurationVault(
+      alpha,
+      keys,
+      configurations,
+    );
+
+    await alphaCredentials.store({
+      id: "openai-primary",
+      kind: "openai",
+      secret: "sk-database-secret",
+    });
+    await alphaConfiguration.store({
+      slack: { teamId: "T-ALPHA" },
+      mcpServers: [],
+    });
+    const raw = await database.pool.query(
+      "select encrypted_value from credentials where tenant_id = $1 union all select encrypted_value from tenant_configurations where tenant_id = $1",
+      [alpha],
+    );
+    expect(JSON.stringify(raw.rows)).not.toMatch(/sk-database-secret|T-ALPHA/);
+    await expect(
+      betaCredentials.read("openai-primary"),
+    ).resolves.toBeUndefined();
+
+    currentVersion = 2;
+    material.set(2, new Uint8Array(32).fill(22));
+    await alphaCredentials.rotateEncryption("openai-primary");
+    await alphaConfiguration.rotateEncryption();
+    await expect(
+      alphaCredentials.read("openai-primary"),
+    ).resolves.toMatchObject({ secret: "sk-database-secret", keyVersion: 2 });
+    await expect(alphaConfiguration.read()).resolves.toMatchObject({
+      configuration: { slack: { teamId: "T-ALPHA" }, mcpServers: [] },
+      version: 1,
+      keyVersion: 2,
+    });
+
+    await alphaCredentials.revoke("openai-primary");
+    await expect(
+      alphaCredentials.read("openai-primary"),
+    ).resolves.toBeUndefined();
+  });
+
   it("rejects cross-Tenant repository access and mismatched database identities", async () => {
     const control = createPostgresStores(database.pool);
     const alpha = tenantId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
