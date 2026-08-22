@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { apiSend, useApi } from "@/lib/client";
+import { TenantSwitcher } from "@/components/tenant-switcher";
 
 export interface StatusPayload {
   agent: {
@@ -86,6 +87,7 @@ export function StatusBar() {
           </span>
         </div>
         <div className="ml-auto flex items-center gap-1.5">
+          <TenantSwitcher />
           <Button size="sm" variant="outline" onClick={restart} disabled={restarting}>
             <RotateCw className={cn("size-3.5", restarting && "animate-spin")} />
             {restarting ? "Restarting…" : "Restart agent"}

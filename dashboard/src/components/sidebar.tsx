@@ -12,6 +12,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +20,7 @@ const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/approvals", label: "Approvals", icon: ShieldCheck },
+  { href: "/operations", label: "Operations", icon: Activity },
   { href: "/repositories", label: "Repositories", icon: GitBranch },
   { href: "/prompts", label: "Prompts", icon: FileText },
   { href: "/skills", label: "Skills", icon: Sparkles },
