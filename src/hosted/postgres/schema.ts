@@ -48,6 +48,23 @@ export const memberships = pgTable(
   },
   (table) => [primaryKey({ columns: [table.tenantId, table.userId] })],
 );
+export const dashboardMagicLinks = pgTable("dashboard_magic_links", {
+  tokenHash: text("token_hash").primaryKey(),
+  email: text().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamps.createdAt,
+});
+export const dashboardSessions = pgTable("dashboard_sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamps.createdAt,
+  rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+});
 export const slackInstallations = pgTable(
   "slack_installations",
   {

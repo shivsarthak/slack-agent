@@ -24,6 +24,8 @@ describe("hosted PostgreSQL migrations", () => {
         "users",
         "tenants",
         "memberships",
+        "dashboard_magic_links",
+        "dashboard_sessions",
         "slack_installations",
         "credentials",
         "jobs",
@@ -63,6 +65,7 @@ describe("hosted PostgreSQL migrations", () => {
       expect(applied.rows.map((row) => row.name)).toEqual([
         "0000_hosted_state.sql",
         "0001_tenant_membership_integrity.sql",
+        "0002_dashboard_identity.sql",
       ]);
     } finally {
       await upgrade.stop();
