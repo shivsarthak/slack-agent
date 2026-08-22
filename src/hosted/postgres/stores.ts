@@ -331,6 +331,11 @@ function tenantStores(pool: Pool, tenantId: TenantId): TenantStores {
               [tenantId, job.id, nextStatus],
             ),
           );
+          await client.query(
+            `insert into audit_events(tenant_id,actor_id,event_type,subject_type,subject_id,payload)
+             values ($1,$2,'approval.decided','approval',$3,$4)`,
+            [tenantId, values.decidedBy, values.id, { decision: values.decision, jobId: job.id }],
+          );
           return {
             job: jobRecord(updatedJob),
             approval: approvalRecord(decided),

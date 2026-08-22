@@ -497,7 +497,7 @@ async function audit(
 ): Promise<void> {
   await client.query(
     "insert into audit_events (tenant_id,actor_id,event_type,subject_type,subject_id,payload,occurred_at) values ($1,$2,$3,'schedule',$4,$5,$6)",
-    [tenantId, actorId, eventType, subjectId, payload, at],
+    [tenantId, actorId ?? "system", eventType, subjectId, payload, at],
   );
 }
 

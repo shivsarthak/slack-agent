@@ -293,7 +293,7 @@ export const auditEvents = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     id: bigserial({ mode: "number" }).notNull(),
-    actorId: text("actor_id"),
+    actorId: text("actor_id").notNull(),
     eventType: text("event_type").notNull(),
     subjectType: text("subject_type").notNull(),
     subjectId: text("subject_id").notNull(),

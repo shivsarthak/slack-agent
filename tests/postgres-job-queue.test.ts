@@ -22,6 +22,21 @@ beforeAll(async () => {
 afterAll(async () => database.stop());
 
 describe("durable PostgreSQL job queue", () => {
+  it("atomically enforces the configured per-Tenant concurrency quota", async () => {
+    const queue = createPostgresJobQueue(pool, { maxConcurrentJobsPerTenant: 1 });
+    await Promise.all([
+      queue.enqueue({ tenantId, id: "quota-a", threadKey: "quota:a", request: "a", idempotencyKey: "quota-a" }),
+      queue.enqueue({ tenantId, id: "quota-b", threadKey: "quota:b", request: "b", idempotencyKey: "quota-b" }),
+    ]);
+
+    const claims = await Promise.all(
+      Array.from({ length: 8 }, (_, index) => queue.claim(`quota-worker-${index}`, 30_000)),
+    );
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    await queue.succeed(claims.find(Boolean)!);
+    expect(await queue.claim("quota-worker-next", 30_000)).toBeDefined();
+  });
+
   it("enqueues idempotently and gives concurrent claimers different jobs", async () => {
     const queue = createPostgresJobQueue(pool);
     const first = await queue.enqueue({
@@ -163,6 +178,13 @@ describe("durable PostgreSQL job queue", () => {
     ).toBe("cancelled");
     const cancelled = await queue.get(tenantId, "cancel");
     expect(cancelled?.cancelledBy).toBe("operator");
+    const cancellationAudit = await pool.query(
+      "select actor_id,payload from audit_events where tenant_id=$1 and event_type='job.cancelled' and subject_id='cancel'",
+      [tenantId],
+    );
+    expect(cancellationAudit.rows).toEqual([
+      { actor_id: "operator", payload: { reason: "no longer needed" } },
+    ]);
 
     await pool.query(
       "insert into jobs (tenant_id,id,thread_key,request,status,attempt,idempotency_key,last_error) values ($1,'dead','c:d','dead','dead-letter',3,'dead','boom')",

@@ -74,6 +74,24 @@ function harness(input: { existing?: { id: string; engine?: string; locator?: st
 }
 
 describe("hosted Pi Job worker", () => {
+  it("redacts secrets from correlated failure logs", async () => {
+    const h = harness();
+    vi.mocked(h.engine.startSession).mockReturnValue(session([
+      { type: "engine-error", message: "authorization: Bearer plaintext" },
+    ]));
+    vi.mocked(h.queue.fail).mockResolvedValue({ ...h.current, status: "failed" });
+    const messages: string[] = [];
+    const worker = createHostedJobWorker({
+      owner: "worker-1", leaseMs: 30_000, queue: h.queue, bootstrap: async () => h.runtime,
+      log: { info: (message) => messages.push(message), warn: () => undefined },
+      classifyRetry: () => "terminal",
+    });
+    await worker.runOnce();
+    expect(messages.join("\n")).toContain('"tenantId"');
+    expect(messages.join("\n")).toContain('"jobId"');
+    expect(messages.join("\n")).not.toContain("plaintext");
+  });
+
   it("runs one claimed Job, durably closes the Turn, and delivers once by Job key", async () => {
     const h = harness();
     const worker = createHostedJobWorker({

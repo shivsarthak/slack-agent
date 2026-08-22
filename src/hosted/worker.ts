@@ -8,6 +8,7 @@ import type { SlackClient } from "../ports/slack.ts";
 import type { McpServerConfig } from "../ports/mcp.ts";
 import { createPiEngine } from "../engine/pi.ts";
 import type { HostedToolAuditEntry } from "./local-tools.ts";
+import { redact, type OperationalMetrics, type OperationalMetricName } from "./observability.ts";
 import { mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { trackTurnDurability } from "../jobs/interruption.ts";
@@ -134,6 +135,7 @@ export function createHostedJobWorker(input: {
   queue: WorkerQueue;
   bootstrap(lease: JobLease): Promise<HostedJobRuntime>;
   log?: Logger;
+  metrics?: OperationalMetrics;
   classifyRetry?: (error: unknown) => "retryable" | "terminal";
 }): HostedJobWorker {
   if (!input.owner || !Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0)
@@ -179,6 +181,7 @@ export function createHostedJobWorker(input: {
       const timer = setInterval(() => void renew(), Math.max(1, Math.floor(input.leaseMs / 3)));
       timer.unref();
       log(input.log, "job.claimed", lease);
+      metric("lease.claimed", lease, "claimed");
 
       try {
         runtime = await input.bootstrap(lease);
@@ -196,6 +199,7 @@ export function createHostedJobWorker(input: {
         const session = known
           ? runtime.engine.resumeSession(known.id, options, known.locator)
           : runtime.engine.startSession(options);
+        metric(known ? "session.resumed" : "session.started", lease, "ok");
         const durability = trackTurnDurability({
           sessions: runtime.sessions,
           tenant: runtime.tenant,
@@ -240,6 +244,7 @@ export function createHostedJobWorker(input: {
         }
         if (actual instanceof LeaseLostError) {
           log(input.log, "job.lease-lost", lease, actual);
+          metric("lease.lost", lease, "lost");
           return { claimed: true, jobId: lease.id, outcome: "lease-lost" } as const;
         }
         const retryable = (input.classifyRetry ?? classifyRetry)(actual) === "retryable";
@@ -259,6 +264,8 @@ export function createHostedJobWorker(input: {
           });
         }
         log(input.log, retryable ? "job.retrying" : "job.failed", lease, actual);
+        if (failed.status === "queued") metric("job.retry", lease, "retrying");
+        if (failed.status === "dead-letter") metric("job.dead-letter", lease, "failed");
         return {
           claimed: true,
           jobId: lease.id,
@@ -276,6 +283,10 @@ export function createHostedJobWorker(input: {
 
       async function waitForRenewal(): Promise<void> {
         while (renewing) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+
+      function metric(name: OperationalMetricName, job: JobLease, outcome: string): void {
+        input.metrics?.increment(name, { tenantId: job.tenantId, jobId: job.id, outcome });
       }
     },
   };
@@ -317,6 +328,6 @@ function log(logger: Logger | undefined, event: string, lease: JobLease, error?:
     jobId: lease.id,
     attempt: lease.attempt,
     leaseOwner: lease.leaseOwner,
-    ...(error === undefined ? {} : { error: reason(error) }),
+    ...(error === undefined ? {} : { error: redact(reason(error)) }),
   }));
 }

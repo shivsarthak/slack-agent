@@ -74,6 +74,7 @@ describe("hosted PostgreSQL migrations", () => {
         "0004_slack_http_ingress.sql",
         "0005_durable_job_queue.sql",
         "0006_openai_codex_onboarding.sql",
+        "0007_usage_observability.sql",
       ]);
     } finally {
       await upgrade.stop();

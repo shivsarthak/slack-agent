@@ -181,6 +181,18 @@ describe("Tenant-bound PostgreSQL stores", () => {
     });
     expect(decided.approval.status).toBe("approved");
     expect(decided.job.status).toBe("queued");
+    const audit = await database.pool.query(
+      "select actor_id,event_type,subject_id,payload from audit_events where tenant_id=$1 and subject_id='approval-1' order by id",
+      [tenant.id],
+    );
+    expect(audit.rows).toEqual([
+      {
+        actor_id: "user-1",
+        event_type: "approval.decided",
+        subject_id: "approval-1",
+        payload: { decision: "approved", jobId: "job-atomic" },
+      },
+    ]);
     await expect(
       stores.approvals.decide({
         id: "approval-1",
@@ -188,5 +200,14 @@ describe("Tenant-bound PostgreSQL stores", () => {
         decidedBy: "user-2",
       }),
     ).rejects.toThrow(/already decided/);
+  });
+
+  it("rejects unattributed audit records", async () => {
+    const control = createPostgresStores(database.pool);
+    const tenant = { id: tenantId("dddddddd-dddd-4ddd-8ddd-dddddddddddd") };
+    await control.tenants.create({ id: tenant.id, name: "Attributed audit" });
+    await expect(control.forTenant(tenant).auditEvents.create({
+      eventType: "credential.rotated", subjectType: "credential", subjectId: "github",
+    })).rejects.toThrow(/actor/i);
   });
 });
