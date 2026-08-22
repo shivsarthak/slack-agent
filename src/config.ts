@@ -230,7 +230,7 @@ export interface Config {
  * that parsed and did nothing would be an instance running with a bound its operator
  * believes they set. Every unknown key is named and refused.
  */
-const configFileSchema = z
+export const configFileSchema = z
   .object({
     slack: z
       .object({

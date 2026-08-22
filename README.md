@@ -87,6 +87,28 @@ cp mcp.example.json mcp.json                                # optional MCP serve
 pnpm start
 ```
 
+To run under the supervisor (required for the admin dashboard's restart button):
+
+```bash
+sh scripts/run-agent.sh
+```
+
+## Admin dashboard
+
+A Next.js admin UI lives in [`dashboard/`](dashboard/). It reads and writes the same
+files the agent uses — config, MCP registry, operating manual, Skills — and shows
+status, vault Notes, the change log, schedules, and approval grants.
+
+```bash
+cd dashboard && pnpm install && pnpm dev     # http://localhost:3100
+```
+
+Auth is a single admin password from `ADMIN_PASSWORD` (in `dashboard/.env.local` or the
+environment). If unset, a random password is generated and logged at startup. Config and
+`mcp.json` edits show a "restart required" banner; the restart button signals the
+supervisor started by `scripts/run-agent.sh` (it writes `.state/agent.pid` and respawns
+the agent). Operating-manual and Skill edits apply to the next job without a restart.
+
 **`.env` holds credentials and nothing else.** `open-agent.config.json` describes the
 instance — the Vault, bounds, model, and the path to `mcp.json`.
 `mcp.json` is the one extensible registry for every MCP server. It supports remote
