@@ -2,6 +2,13 @@
 
 The domain language for this project. A glossary, not a spec — no implementation detail belongs here.
 
+## Tenant
+
+One Slack workspace and everything the coworker holds or runs for it: its Threads, Vault,
+Skills, configuration, credentials, Sessions, Jobs, and Schedules. Every domain operation
+belongs to an explicit Tenant. A self-hosted instance has exactly one Tenant; hosted
+composition may serve many, without sharing their state.
+
 ## Thread
 
 A Slack conversation thread. The unit of **topic** and the unit of **audience**: everyone who can see the channel can see the thread, and nothing crosses between threads except through the [Vault](#vault).

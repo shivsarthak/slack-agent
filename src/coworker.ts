@@ -1,14 +1,7 @@
 import type { Config } from "./config.ts";
 import { reasonFor } from "./failure.ts";
-import {
-  prepareOutputDirectory,
-  shareResultFiles,
-} from "./files/egress.ts";
-import {
-  ingestMentionFiles,
-  isVisualInput,
-  supportsMentionFile,
-} from "./files/ingress.ts";
+import { prepareOutputDirectory, shareResultFiles } from "./files/egress.ts";
+import { ingestMentionFiles, isVisualInput, supportsMentionFile } from "./files/ingress.ts";
 import type { IngestedFile, MentionFile } from "./files/types.ts";
 import { boundJob, type JobBounds, type StopReason } from "./jobs/bounds.ts";
 import { trackTurnDurability } from "./jobs/interruption.ts";
@@ -29,11 +22,7 @@ import { runPreflight } from "./preflight/run.ts";
 import { startAuditTrail, type AuditTrail } from "./reporter/audit.ts";
 import { startJobStatus, type JobStatus } from "./reporter/status.ts";
 import { threadKey, type Thread } from "./thread.ts";
-import {
-  openVaultChangeLog,
-  vaultChangeLogFile,
-  type VaultChangeLog,
-} from "./vault/change-log.ts";
+import { openVaultChangeLog, vaultChangeLogFile, type VaultChangeLog } from "./vault/change-log.ts";
 import { runLibrarianPass } from "./vault/librarian.ts";
 import { NO_ROOT_NOTE, readRootNote, rootNoteConcerns, type RootNote } from "./vault/root.ts";
 import { readSkills } from "./vault/skills.ts";
@@ -44,15 +33,17 @@ import {
   type VaultWindows,
 } from "./vault/window.ts";
 import { prepareWorkspace, workspaceDirectory } from "./workspace.ts";
-import {
-  startWorkspaceLifecycle,
-  type WorkspaceLifecycle,
-} from "./workspaces/lifecycle.ts";
+import { startWorkspaceLifecycle, type WorkspaceLifecycle } from "./workspaces/lifecycle.ts";
 import { writeScope } from "./writes/classify.ts";
-import { createApprovalCoordinator, type ApprovalClick, type ApprovalClickResult } from "./approvals/coordinator.ts";
+import {
+  createApprovalCoordinator,
+  type ApprovalClick,
+  type ApprovalClickResult,
+} from "./approvals/coordinator.ts";
 import { approvalStoreFile, openApprovalStore } from "./approvals/store.ts";
 import { createContextualReviewer } from "./approvals/reviewer.ts";
 import type { ContextualReviewer } from "./approvals/policy.ts";
+import type { Tenant } from "./tenant.ts";
 
 /**
  * The gate fails closed when the reviewer breaks, which is right — but silently,
@@ -113,6 +104,7 @@ export interface ScheduledJob {
 }
 
 export interface CoworkerDeps {
+  tenant: Tenant;
   config: Config;
   slack: SlackClient;
   engine: Engine;
@@ -133,6 +125,7 @@ export interface CoworkerDeps {
 }
 
 export interface Coworker {
+  readonly tenant: Tenant;
   /** Checked before the first mention is accepted, so surprises surface at startup. */
   preflight(): Promise<void>;
   /**
@@ -146,11 +139,25 @@ export interface Coworker {
 }
 
 export function createCoworker(deps: CoworkerDeps): Coworker {
-  const approvals = openApprovalStore({ filePath: approvalStoreFile(deps.config.stateDir) }).then((store) =>
+  const approvals = openApprovalStore({
+    filePath: approvalStoreFile(deps.config.stateDir),
+  }).then((store) =>
     createApprovalCoordinator({
-      config: deps.config.approvals, slack: deps.slack, store, clock: deps.clock, log: deps.log,
+      config: deps.config.approvals,
+      slack: deps.slack,
+      store,
+      clock: deps.clock,
+      log: deps.log,
       ...(deps.config.approvals.policy
-        ? { reviewer: loggedReviewer(createContextualReviewer({ engine: deps.engine, clock: deps.clock }), deps.log) }
+        ? {
+            reviewer: loggedReviewer(
+              createContextualReviewer({
+                engine: deps.engine,
+                clock: deps.clock,
+              }),
+              deps.log,
+            ),
+          }
         : {}),
     }),
   );
@@ -165,7 +172,9 @@ export function createCoworker(deps: CoworkerDeps): Coworker {
    * At most one per Thread, and the queue is what makes that true.
    */
   const running = new Map<string, JobBounds>();
-  const queue = createJobQueue({ maxConcurrentJobs: deps.config.bounds.maxConcurrentJobs });
+  const queue = createJobQueue({
+    maxConcurrentJobs: deps.config.bounds.maxConcurrentJobs,
+  });
   /**
    * Which Jobs have the Vault open right now.
    *
@@ -188,6 +197,7 @@ export function createCoworker(deps: CoworkerDeps): Coworker {
   });
 
   return {
+    tenant: deps.tenant,
     handleApproval: async (click) => (await approvals).decide(click),
     preflight: async () => {
       await runPreflight(deps);
@@ -205,10 +215,13 @@ export function createCoworker(deps: CoworkerDeps): Coworker {
       // kill, and giving it a status message would leave an "On it" hanging over a
       // Thread where the answer is that something has ended.
       if (isStopRequest(mention.text)) {
-        return { jobId: mention.eventId, completed: Promise.all([
-          hardStop(deps, running, queue, mention),
-          approvals.then((coordinator) => coordinator.cancelThread(threadKey(mention.thread))),
-        ]).then(() => undefined) };
+        return {
+          jobId: mention.eventId,
+          completed: Promise.all([
+            hardStop(deps, running, queue, mention),
+            approvals.then((coordinator) => coordinator.cancelThread(threadKey(mention.thread))),
+          ]).then(() => undefined),
+        };
       }
 
       // Taken before the acknowledgement is posted, and synchronously: the promise is
@@ -228,7 +241,10 @@ export function createCoworker(deps: CoworkerDeps): Coworker {
       let acknowledgement: Acknowledgement;
       try {
         acknowledgement = place.waiting
-          ? { receipt: await postReceipt(deps, mention, place.waiting), waited: place.waiting }
+          ? {
+              receipt: await postReceipt(deps, mention, place.waiting),
+              waited: place.waiting,
+            }
           : { started: await statusFor(deps, mention.thread) };
       } catch (error) {
         // Nothing was said in the Thread, so this Job is not happening — and its place
@@ -275,7 +291,10 @@ export function createCoworker(deps: CoworkerDeps): Coworker {
       let acknowledgement: Acknowledgement;
       try {
         acknowledgement = place.waiting
-          ? { receipt: await postReceipt(deps, mention, place.waiting), waited: place.waiting }
+          ? {
+              receipt: await postReceipt(deps, mention, place.waiting),
+              waited: place.waiting,
+            }
           : { started: await statusFor(deps, mention.thread) };
       } catch (error) {
         place.abandon();
@@ -502,10 +521,7 @@ async function runJob(
       slack: deps.slack,
       workspaceDir: workingDirectory,
       jobId: mention.eventId,
-      files: distinctFiles([
-        ...earlierFiles.filter(supportsMentionFile),
-        ...mention.files,
-      ]),
+      files: distinctFiles([...earlierFiles.filter(supportsMentionFile), ...mention.files]),
       maxBytes: deps.config.fileTransfer.maxDownloadBytes,
     });
     audit = startAuditTrail({
@@ -541,7 +557,7 @@ async function runJob(
     // should follow.
     const skills = await readSkills(deps.config.skillsDir);
 
-    const recorded = await deps.sessions.get(mention.thread);
+    const recorded = await deps.sessions.get(deps.tenant, mention.thread);
     const session = openSession(deps, mention.thread, recorded?.id, {
       workingDirectory,
       // The Notes and nothing else. **`skillsDir` must never appear here** — that omission
@@ -553,6 +569,7 @@ async function runJob(
     });
     const turns = trackTurnDurability({
       sessions: deps.sessions,
+      tenant: deps.tenant,
       thread: mention.thread,
       known: recorded,
     });
@@ -581,15 +598,22 @@ async function runJob(
         imagePaths: ingestedFiles.filter(isVisualInput).map((file) => file.path),
         onApproval: async (action, engineSignal) => {
           await status.setWaitingForApproval(true);
-          const decision = await approvals.authorize(action, {
-            request: mention.text,
-            trustedHumanMessages: threadMessages
-              .filter((message) => message.userId === mention.userId)
-              .map((message) => message.text),
-            threadKey: threadKey(mention.thread),
-            requesterUserId: mention.userId,
-            workspaceDirectory: workingDirectory,
-          }, mention.thread, engineSignal === undefined ? bounds.signal : AbortSignal.any([bounds.signal, engineSignal]));
+          const decision = await approvals.authorize(
+            action,
+            {
+              request: mention.text,
+              trustedHumanMessages: threadMessages
+                .filter((message) => message.userId === mention.userId)
+                .map((message) => message.text),
+              threadKey: threadKey(mention.thread),
+              requesterUserId: mention.userId,
+              workspaceDirectory: workingDirectory,
+            },
+            mention.thread,
+            engineSignal === undefined
+              ? bounds.signal
+              : AbortSignal.any([bounds.signal, engineSignal]),
+          );
           if (!bounds.signal.aborted) await status.setWaitingForApproval(false);
           return decision;
         },
@@ -666,9 +690,7 @@ async function runJob(
         results.shared.length === 0
           ? ""
           : `I shared ${results.shared.map((result) => result.filename).join(", ")}. `;
-      const unsharedNames = results.unshared
-        .map((result) => result.filename)
-        .join(", ");
+      const unsharedNames = results.unshared.map((result) => result.filename).join(", ");
       // A model may optimistically say that it attached a file before this delivery
       // boundary actually runs. Once delivery fails, replace that draft with an account
       // grounded in the observed result so the Thread never receives a false claim.

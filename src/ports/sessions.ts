@@ -1,4 +1,5 @@
 import type { Thread } from "../thread.ts";
+import type { Tenant } from "../tenant.ts";
 
 /**
  * **The wrapper's only durable state**, in one record per Thread.
@@ -28,13 +29,13 @@ export interface SessionRecord {
 /**
  * Where {@link SessionRecord}s live between Jobs.
  *
- * Two methods, keyed by Thread, storing identifiers rather than conversation. If a
+ * Two methods, keyed by Tenant and Thread, storing identifiers rather than conversation. If a
  * future ticket finds itself wanting to keep transcripts here, that is the signal to
  * reread ADR-0003 rather than to widen this interface.
  */
 export interface SessionStore {
   /** What is recorded for this Thread, or undefined if it has no Session yet. */
-  get(thread: Thread): Promise<SessionRecord | undefined>;
+  get(tenant: Tenant, thread: Thread): Promise<SessionRecord | undefined>;
   /**
    * Record this Thread's Session.
    *
@@ -45,5 +46,5 @@ export interface SessionStore {
    * cost of that is one Thread starting over, which is not worth an `fsync` on every
    * Job — but it is worth stating rather than implying.
    */
-  set(thread: Thread, record: SessionRecord): Promise<void>;
+  set(tenant: Tenant, thread: Thread, record: SessionRecord): Promise<void>;
 }

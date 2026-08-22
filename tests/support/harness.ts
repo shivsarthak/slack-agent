@@ -26,6 +26,8 @@ import {
   FakeSlack,
 } from "./fakes.ts";
 import { testTempDir } from "./test-root.ts";
+import type { CoworkerDeps } from "../../src/coworker.ts";
+import { tenantId } from "../../src/tenant.ts";
 
 export const BOT_USER_ID = "U0COWORKER";
 export const DEFAULT_THREAD_TS = "1700000000.000100";
@@ -82,6 +84,7 @@ export type PartialConnector = Omit<
 };
 
 export interface CoworkerHarness {
+  deps: Omit<CoworkerDeps, "tenant">;
   /** The temporary directory holding everything this instance keeps on disk. */
   root: string;
   notesDir: string;
@@ -184,7 +187,9 @@ export async function coworkerHarness(options: HarnessOptions = {}): Promise<Cow
 
   // A real file, like the Vault: "the mapping survives a restart" is a claim about
   // disk, and an in-memory double would let it pass without being true.
-  const sessions = await openSessionStore({ filePath: sessionStoreFile(stateDir) });
+  const sessions = await openSessionStore({
+    filePath: sessionStoreFile(stateDir),
+  });
 
   const clock = new FakeClock();
   // Stamped by the same clock the coworker uses, so "refreshed inside two minutes" is
@@ -197,7 +202,7 @@ export async function coworkerHarness(options: HarnessOptions = {}): Promise<Cow
   const logs: string[] = [];
   const warnings: string[] = [];
 
-  const coworker = createCoworker({
+  const deps: Omit<CoworkerDeps, "tenant"> = {
     config,
     slack,
     engine,
@@ -219,11 +224,18 @@ export async function coworkerHarness(options: HarnessOptions = {}): Promise<Cow
         warnings.push(message);
       },
     },
+  };
+  const coworker = createCoworker({
+    ...deps,
+    tenant: { id: tenantId("test-tenant") },
   });
 
   const mentions = createMentionGateway({
     coworker,
-    log: { info: (message) => logs.push(message), warn: (message) => warnings.push(message) },
+    log: {
+      info: (message) => logs.push(message),
+      warn: (message) => warnings.push(message),
+    },
   });
 
   let nextEvent = 1;
@@ -248,9 +260,7 @@ export async function coworkerHarness(options: HarnessOptions = {}): Promise<Cow
   };
 
   /** Deliver a mention and wait for its Job to finish. */
-  const mention = async (
-    overrides: MentionOverrides = {},
-  ): Promise<Delivery> => {
+  const mention = async (overrides: MentionOverrides = {}): Promise<Delivery> => {
     const { event, envelope } = appMention(overrides);
     const delivery = await mentions.deliver(event, envelope);
     if (delivery.accepted) await delivery.completed;
@@ -258,14 +268,13 @@ export async function coworkerHarness(options: HarnessOptions = {}): Promise<Cow
   };
 
   /** Deliver a mention and return as soon as it has been acknowledged. */
-  const startMention = (
-    overrides: MentionOverrides = {},
-  ): Promise<Delivery> => {
+  const startMention = (overrides: MentionOverrides = {}): Promise<Delivery> => {
     const { event, envelope } = appMention(overrides);
     return mentions.deliver(event, envelope);
   };
 
   return {
+    deps,
     root,
     notesDir,
     skillsDir,

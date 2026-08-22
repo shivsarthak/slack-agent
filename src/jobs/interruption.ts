@@ -1,6 +1,7 @@
 import type { EngineEvent } from "../ports/engine.ts";
 import type { SessionRecord, SessionStore } from "../ports/sessions.ts";
 import type { Thread } from "../thread.ts";
+import type { Tenant } from "../tenant.ts";
 
 /**
  * Whether this Thread has a Turn in flight — written down, so that "in flight when
@@ -29,6 +30,7 @@ export interface TurnDurability {
 
 export function trackTurnDurability(deps: {
   sessions: SessionStore;
+  tenant: Tenant;
   thread: Thread;
   /** What this Thread already had recorded, so an unchanged flag is not rewritten. */
   known: SessionRecord | undefined;
@@ -40,7 +42,10 @@ export function trackTurnDurability(deps: {
     const id = sessionId;
     if (id === undefined || inFlight === nowInFlight) return;
     inFlight = nowInFlight;
-    await deps.sessions.set(deps.thread, { id, interrupted: nowInFlight });
+    await deps.sessions.set(deps.tenant, deps.thread, {
+      id,
+      interrupted: nowInFlight,
+    });
   };
 
   return {
