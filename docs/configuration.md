@@ -74,6 +74,15 @@ timestamp, action, Note path, originating Thread and Job, optional attribution d
 the full available diff. Vault bookkeeping is not posted into Slack; external Write
 receipts are unchanged. Relative paths resolve against the instance file as usual.
 
+`stateDir` also holds the sandbox's own scratch space, at `<stateDir>/sandbox`. A Job's
+`TMPDIR` and its package managers' caches and stores (npm, pnpm, Corepack, Yarn, Bun) are
+pointed there, so a large dependency install writes to the same disk-backed volume as the
+wrapper rather than the host's shared, frequently RAM-backed `/tmp`. One Job pointing a
+pnpm store at `/tmp` filled a 1.9 GiB tmpfs and stopped every other Job on the machine from
+launching; keeping this data here is what prevents a repeat, and it means the machine's
+storage has to be sized for the largest install a Job may run, not just for the wrapper's
+own state. Startup reports the free space on that filesystem and warns when it is low.
+
 ### `bounds`
 
 What stops a Job that does not stop by itself. Codex supplies none of this — no timeout, no
