@@ -1,6 +1,7 @@
 import { loadConfig } from "./config.ts";
 import { createCoworker } from "./coworker.ts";
 import { createCodexEngine } from "./engine/codex.ts";
+import { sandboxRoot } from "./engine/sandbox-env.ts";
 import { createGitHubRepositoryProtectionProbe } from "./github/protection.ts";
 import { createConsoleLogger } from "./log.ts";
 import { createMcpInventoryProber } from "./mcp/prober.ts";
@@ -50,6 +51,10 @@ async function main(): Promise<void> {
     engine: await createCodexEngine({
       ...config.engine,
       mcpServers: [...config.mcpServers, scheduleMcp.config],
+      // Bulk temporary data and package caches go to disk under the wrapper's own state,
+      // never the host's shared `/tmp` (issue #26).
+      sandboxRoot: sandboxRoot(config.stateDir),
+      env: process.env,
     }),
     clock: systemClock,
     sessions: await openSessionStore({ filePath: sessionStoreFile(config.stateDir) }),

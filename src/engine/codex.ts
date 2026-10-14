@@ -25,6 +25,7 @@ import type {
   SessionOptions,
 } from "../ports/engine.ts";
 import type { McpServerConfig } from "../ports/mcp.ts";
+import { buildSandboxEnv, prepareSandboxRoot } from "./sandbox-env.ts";
 
 /**
  * The Codex adapter — the **only** module in this codebase that imports
@@ -50,6 +51,18 @@ export interface CodexEngineOptions {
   reasoningEffort: "minimal" | "low" | "medium" | "high" | "xhigh";
   /** An explicit `codex` binary, when the one on `PATH` is not the one to run. */
   codexPath?: string | undefined;
+  /**
+   * The disk-backed root a Job's temporary files and package caches are pointed at, so a
+   * bulk install cannot fill the host's shared (and often RAM-backed) `/tmp`. When unset,
+   * the subprocess environment is left exactly as the wrapper inherited it — the previous
+   * behaviour, kept for a caller that has no better location to offer. See `sandbox-env.ts`.
+   */
+  sandboxRoot?: string | undefined;
+  /**
+   * The wrapper's own environment. The credential store names variables in it, so it is
+   * carried into the subprocess rather than replaced. Defaults to `process.env`.
+   */
+  env?: NodeJS.ProcessEnv | undefined;
   /**
    * The MCP connectors, which Codex reads as its own configuration (ADR-0005).
    *
@@ -88,12 +101,19 @@ const SANDBOX = {
 export async function createCodexEngine(options: CodexEngineOptions): Promise<Engine> {
   const binary = await resolveCodexBinary(options.codexPath);
   const generated = engineConfig(options.mcpServers ?? []);
+  const baseEnv = options.env ?? process.env;
+  const root = options.sandboxRoot;
+  if (root !== undefined) prepareSandboxRoot(root);
   const codex = new Codex({
     ...(binary.path ? { codexPathOverride: binary.path } : {}),
     // Flattened by the SDK into repeated `--config key=value` overrides, so the whole
     // `config.toml` surface is reachable — and so the deny-list this instance generates
     // reaches the subprocess without a file anybody has to keep in sync.
     config: generated,
+    // The SDK replaces the subprocess environment wholesale when this is set, so `baseEnv`
+    // is spread in explicitly and the credential variables survive. When no disk-backed
+    // root was offered, the environment is left alone and the engine keeps its own default.
+    ...(root === undefined ? {} : { env: buildSandboxEnv(baseEnv, root) }),
   });
 
   const threadOptions = (session: SessionOptions): ThreadOptions => ({

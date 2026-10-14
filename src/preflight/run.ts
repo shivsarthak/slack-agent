@@ -1,4 +1,5 @@
 import { RECORDED_CODEX_VERSION, type Config } from "../config.ts";
+import { sandboxRoot } from "../engine/sandbox-env.ts";
 import { reasonFor } from "../failure.ts";
 import type { Engine } from "../ports/engine.ts";
 import type { Logger } from "../ports/log.ts";
@@ -8,6 +9,7 @@ import type { SlackClient } from "../ports/slack.ts";
 import { readRootNote, rootNoteConcerns, ROOT_NOTE_FILENAME } from "../vault/root.ts";
 import { checkConnectors } from "./connectors.ts";
 import { checkSkills } from "./skills.ts";
+import { checkSandboxStorage } from "./storage.ts";
 
 /**
  * What the instance checks before it accepts its first mention.
@@ -49,6 +51,7 @@ export async function runPreflight(deps: {
 
   await checkEngine(deps);
   reportBounds(deps);
+  await checkSandboxStorage({ sandboxRoot: sandboxRoot(deps.config.stateDir), log: deps.log });
   await reportVault(deps);
   await checkSkills(deps);
   await checkSlack(deps);
@@ -115,8 +118,9 @@ async function checkEngine(deps: { engine: Engine; log: Logger }): Promise<void>
   const sandbox = deps.engine.sandbox;
   deps.log.info(
     `Sandbox: ${sandbox.mode}, network ${sandbox.networkEnabled ? "enabled" : "disabled"}, ` +
-      `execpolicy ${sandbox.execPolicy}. The engine may write a Job's workspace and the ` +
-      "Notes, and nothing else.",
+      `execpolicy ${sandbox.execPolicy}. The engine may write a Job's workspace, the ` +
+      "Notes, and the sandbox's own temporary and cache directories — the last of which " +
+      "the wrapper points at disk so a large install cannot fill the host's shared /tmp.",
   );
 }
 
